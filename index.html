@@ -2,48 +2,56 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Minecraft Music Pack Studio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Minecraft Music Studio</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-<div class="container">
-    <h1>Minecraft Music Pack Studio</h1>
-    
-    <div class="meta-panel">
-        <div class="meta-group">
+<header class="app-header glass">
+    <h1>🎵 Music Studio</h1>
+</header>
+
+<main class="app-main">
+    <section class="panel glass">
+        <div class="input-group">
             <label for="modName">Nombre del Mod</label>
-            <input type="text" id="modName" placeholder="Ej. Mis Canciones Favoritas" required>
+            <input type="text" id="modName" placeholder="Ej. Mis Éxitos" required>
         </div>
 
-        <div class="meta-group">
+        <div class="input-group">
             <label for="modDesc">Descripción</label>
-            <input type="text" id="modDesc" placeholder="Ej. Reemplaza los 22 discos originales" required>
+            <input type="text" id="modDesc" placeholder="Ej. Paquete de los 22 discos" required>
         </div>
 
-        <div class="meta-group" style="grid-column: 1 / -1;">
-            <label for="modIcon">Imagen de Portada (pack_icon.png)</label>
-            <input type="file" id="modIcon" accept="image/png, image/jpeg" required>
+        <div class="input-group">
+            <label for="modIcon">📸 Imagen de Portada (pack_icon.png)</label>
+            <input type="file" id="modIcon" accept="image/png, image/jpeg" required class="file-input">
         </div>
+    </section>
 
-        <div class="bulk-section">
-            <label for="bulkSongs" style="margin-top:0; color: var(--primary);">📥 Cargar Canciones en Lote</label>
-            <span>Selecciona múltiples archivos de música a la vez para auto-rellenar el tablero</span>
-            <input type="file" id="bulkSongs" accept="audio/*" multiple>
+    <section class="panel glass bulk-panel">
+        <div class="bulk-content">
+            <h3>📥 Carga Rápida en Lote</h3>
+            <p>Selecciona varios archivos a la vez para llenar los discos automáticamente.</p>
+            <label for="bulkSongs" class="btn-action primary-glow">Elegir Múltiples Audios</label>
+            <input type="file" id="bulkSongs" accept="audio/*" multiple style="display:none;">
         </div>
-    </div>
+    </section>
 
-    <div class="discs-grid" id="discsGrid"></div>
+    <section class="disc-list" id="discsGrid"></section>
+</main>
 
-    <button id="generateBtn" class="btn-generate">Crear y Descargar .mcpack</button>
-    <div id="globalStatus"></div>
+<div class="bottom-bar glass">
+    <div id="globalStatus">Esperando audios...</div>
+    <button id="generateBtn" class="btn-generate">🚀 Empaquetar Mod</button>
 </div>
 
 <script type="module">
     import { encodeAudioBuffer } from 'https://esm.sh/sl-web-ogg@1.0.1';
 
+    // Lista oficial de los 22 discos (Actualizada a las últimas versiones)
     const DISCS = [
         "11", "13", "blocks", "cat", "chirp", "far", 
         "mall", "mellohi", "stal", "strad", "wait", "ward", 
@@ -62,26 +70,29 @@
         return audioCtx;
     }
 
+    // Inicializador de Interfaz Mobile
     function initGrid() {
         const grid = document.getElementById('discsGrid');
         slotsData.forEach((slot, index) => {
             const card = document.createElement('div');
-            card.className = `disc-card status-empty`;
+            card.className = `disc-card empty`;
             card.id = `card-${index}`;
             card.innerHTML = `
-                <div>
-                    <p class="disc-title">Disco: ${slot.discName}</p>
-                    <div class="file-name" id="name-${index}">Sin archivo asignado</div>
+                <div class="card-header">
+                    <div class="disc-icon">💿</div>
+                    <div class="disc-info">
+                        <h3>Disco: ${slot.discName}</h3>
+                        <p id="name-${index}">Vacío</p>
+                    </div>
+                    <button class="btn-close" onclick="clearSlot(${index})">✕</button>
                 </div>
-                <div>
-                    <div class="progress-container">
-                        <progress id="progress-${index}" value="0" max="100"></progress>
-                        <span class="progress-text" id="text-${index}">0%</span>
-                    </div>
-                    <div class="card-actions">
-                        <button class="btn-card btn-subir" onclick="triggerIndividualUpload(${index})">Subir</button>
-                        <button class="btn-card btn-clear" onclick="clearSlot(${index})">×</button>
-                    </div>
+                <div class="progress-wrapper">
+                    <progress id="progress-${index}" value="0" max="100"></progress>
+                </div>
+                <div class="card-actions">
+                    <button class="btn-action secondary" onclick="triggerIndividualUpload(${index})">
+                        Subir Audio
+                    </button>
                     <input type="file" id="input-${index}" accept="audio/*" style="display:none;" onchange="handleIndividualUpload(this, ${index})">
                 </div>
             `;
@@ -89,6 +100,7 @@
         });
     }
 
+    // Funciones Globales para el HTML
     window.triggerIndividualUpload = (index) => document.getElementById(`input-${index}`).click();
     window.handleIndividualUpload = (input, index) => {
         if (input.files.length > 0) { assignFileToSlot(input.files[0], index); input.value = ""; }
@@ -124,27 +136,24 @@
     function updateCardUI(index) {
         const slot = slotsData[index];
         const card = document.getElementById(`card-${index}`);
-        const nameCell = document.getElementById(`name-${index}`);
+        const nameText = document.getElementById(`name-${index}`);
         const progressBar = document.getElementById(`progress-${index}`);
-        const progressText = document.getElementById(`text-${index}`);
 
-        card.className = `disc-card status-${slot.status}`;
+        card.className = `disc-card ${slot.status}`;
         progressBar.value = slot.progress;
-        progressText.innerText = `${slot.progress}%`;
 
         if (slot.status === 'empty') {
-            nameCell.innerText = "Sin archivo asignado";
+            nameText.innerText = "Vacío";
         } else if (slot.status === 'converting') {
-            nameCell.innerText = `⏳ ${slot.file.name}`;
+            nameText.innerText = `⏳ Procesando...`;
         } else if (slot.status === 'ready') {
-            nameCell.innerText = `🎵 ${slot.file.name}`;
-            progressText.innerText = "Listo";
+            nameText.innerText = `🎵 Listo: ${slot.file.name}`;
         } else if (slot.status === 'error') {
-            nameCell.innerText = `❌ Formato no soportado`;
-            progressText.innerText = "Fallo";
+            nameText.innerText = `❌ Audio no válido`;
         }
     }
 
+    // Motor de Audio Ultra Rápido NATIVO
     async function processQueue() {
         if (isProcessingQueue) return;
         isProcessingQueue = true;
@@ -185,16 +194,18 @@
         const statusEl = document.getElementById('globalStatus');
         const btn = document.getElementById('generateBtn');
 
-        if (!name || !desc || !iconFile) { alert("Por favor, rellena el Nombre, Descripción e Icono del Mod."); return; }
+        if (!name || !desc || !iconFile) { alert("Completa el Nombre, Descripción e Icono."); return; }
 
         const missingDiscs = slotsData.filter(s => s.status !== 'ready').map(s => s.discName);
-        if (missingDiscs.length > 0) { alert(`Aún faltan discos por preparar: ${missingDiscs.join(', ')}`); return; }
+        if (missingDiscs.length > 0) { alert(`Aún faltan discos: ${missingDiscs.join(', ')}`); return; }
 
         try {
             btn.disabled = true;
-            statusEl.innerText = "Comprimiendo mod final...";
+            statusEl.innerText = "Comprimiendo mod...";
 
             const zip = new JSZip();
+            
+            // Manifest.json
             const manifest = {
                 format_version: 2,
                 header: { name: name, description: desc, uuid: crypto.randomUUID(), version: [1, 0, 0], min_engine_version: [1, 16, 0] },
@@ -203,9 +214,30 @@
             zip.file("manifest.json", JSON.stringify(manifest, null, 2));
             zip.file("pack_icon.png", iconFile);
 
-            const recordsFolder = zip.folder("sounds").folder("music").folder("game").folder("records");
-            slotsData.forEach(slot => { recordsFolder.file(`${slot.discName}.ogg`, slot.blob); });
+            // ¡AQUÍ ESTÁ LA MAGIA QUE ARREGLA EL JUEGO! (sound_definitions.json)
+            const soundDefinitions = {
+                format_version: "1.21.0",
+                sound_definitions: {}
+            };
 
+            const recordsFolder = zip.folder("sounds").folder("music").folder("game").folder("records");
+            
+            slotsData.forEach(slot => {
+                // Escribir el audio ogg
+                recordsFolder.file(`${slot.discName}.ogg`, slot.blob);
+                
+                // Forzar a Minecraft Bedrock a leerlo
+                soundDefinitions.sound_definitions[`record.${slot.discName}`] = {
+                    category: "record",
+                    stream: true,
+                    sounds: [`sounds/music/game/records/${slot.discName}`] // Obligatorio SIN .ogg
+                };
+            });
+
+            // Guardar el mapa de sonidos
+            zip.folder("sounds").file("sound_definitions.json", JSON.stringify(soundDefinitions, null, 2));
+
+            // Descarga final
             const blob = await zip.generateAsync({ type: "blob" });
             const downloadUrl = URL.createObjectURL(blob);
             const a = document.createElement("a");
@@ -216,13 +248,14 @@
             document.body.removeChild(a);
             URL.revokeObjectURL(downloadUrl);
 
-            statusEl.innerText = "¡Mod creado exitosamente!";
-            statusEl.style.color = "var(--status-ready)";
+            statusEl.innerText = "¡Listo para instalar!";
+            statusEl.style.color = "#10b981";
         } catch (error) {
-            statusEl.innerText = "Error crítico construyendo el archivo pack.";
-            statusEl.style.color = "var(--status-error)";
+            statusEl.innerText = "Error crítico.";
+            statusEl.style.color = "#ef4444";
         } finally {
             btn.disabled = false;
+            setTimeout(() => { statusEl.innerText = "Esperando audios..."; statusEl.style.color = "var(--text-sub)"; }, 3000);
         }
     });
 
