@@ -1,19 +1,24 @@
-/* Variables de Tema Neón / Vivo */
+/* Variables de Tema Neón: Morado y Verde */
 :root {
-    --bg-main: #09090b;
-    --bg-card: rgba(24, 24, 27, 0.7);
-    --bg-input: rgba(39, 39, 42, 0.8);
-    --accent: #8310b9; /* Verde Esmeralda Vivo */
-    --accent-hover: #d334a694;
-    --accent-glow: rgba(16, 18, 154, 0.4);
-    --text-main: #f4f4f5;
-    --text-sub: #a1a1aa;
-    --border-light: rgba(255, 255, 255, 0.1);
+    --bg-main: #0a0510; /* Púrpura súper oscuro casi negro */
+    --bg-card: rgba(28, 18, 43, 0.7); /* Púrpura cristal */
+    --bg-input: rgba(43, 27, 66, 0.8);
     
-    /* Estados */
-    --st-empty: #3f3f46;
-    --st-converting: #f59e0b; /* Ambar vivo */
-    --st-ready: #10b981;
+    --accent: #a855f7; /* Morado Neón */
+    --accent-hover: #c084fc;
+    --accent-glow: rgba(168, 85, 247, 0.4);
+    
+    --secondary: #10b981; /* Verde Esmeralda */
+    --secondary-glow: rgba(16, 185, 129, 0.4);
+    
+    --text-main: #f4f4f5;
+    --text-sub: #b7a8cc; /* Texto grisáceo con tono morado */
+    --border-light: rgba(168, 85, 247, 0.2);
+    
+    /* Estados de las tarjetas */
+    --st-empty: #4c3866;
+    --st-converting: #a855f7; /* Morado procesando */
+    --st-ready: #10b981; /* Verde listo */
     --st-error: #ef4444;
 }
 
@@ -23,7 +28,7 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background-color: var(--bg-main);
     color: var(--text-main);
-    padding-bottom: 120px; /* Espacio para el botón fijo inferior */
+    padding-bottom: 120px; 
     overflow-x: hidden;
 }
 
@@ -32,7 +37,7 @@ body::before {
     position: fixed;
     top: -50%; left: -50%;
     width: 200%; height: 200%;
-    background: radial-gradient(circle at 50% 50%, rgba(16, 185, 129, 0.08), transparent 60%);
+    background: radial-gradient(circle at 50% 50%, rgba(168, 85, 247, 0.08), transparent 60%);
     animation: pulseBg 8s infinite alternate ease-in-out;
     z-index: -1;
 }
@@ -64,9 +69,10 @@ body::before {
     margin: 0;
     font-size: 1.4rem;
     font-weight: 800;
-    background: linear-gradient(to right, #6ee7b7, #10b981);
+    /* Degradado de Verde a Morado para el título */
+    background: linear-gradient(to right, var(--secondary), var(--accent));
     -webkit-background-clip: text;
-    background-clip: text;
+    background-clip: text; 
     color: transparent;
     text-shadow: 0 4px 15px var(--accent-glow);
 }
@@ -74,7 +80,7 @@ body::before {
 /* Estructura Principal */
 .app-main {
     padding: 15px;
-    max-width: 600px; /* Optimizado para móviles y tablets */
+    max-width: 600px; 
     margin: 0 auto;
 }
 
@@ -133,7 +139,7 @@ input[type="text"]:focus {
 .bulk-panel {
     border: 2px dashed var(--accent);
     text-align: center;
-    background: linear-gradient(180deg, rgba(16, 185, 129, 0.05) 0%, rgba(0,0,0,0) 100%);
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.05) 0%, rgba(0,0,0,0) 100%);
 }
 .bulk-content h3 { margin: 0 0 5px 0; color: var(--accent); font-size: 1.2rem;}
 .bulk-content p { font-size: 0.85rem; color: var(--text-sub); margin-bottom: 15px; }
@@ -165,7 +171,7 @@ input[type="text"]:focus {
     color: var(--text-main);
 }
 
-/* Tarjetas de Discos (Estilo Lista de Reproducción) */
+/* Tarjetas de Discos */
 .disc-list {
     display: flex;
     flex-direction: column;
@@ -223,14 +229,14 @@ input[type="text"]:focus {
 .progress-wrapper { width: 100%; height: 6px; background: rgba(255,255,255,0.05); border-radius: 10px; overflow: hidden; }
 progress { width: 100%; height: 100%; border: none; background: transparent; }
 progress::-webkit-progress-bar { background: transparent; }
-progress::-webkit-progress-value { background: var(--accent); transition: width 0.3s ease; border-radius: 10px; }
+progress::-webkit-progress-value { background: var(--st-converting); transition: width 0.3s ease; border-radius: 10px; }
 
 /* ESTADOS VIVOS (Animaciones de las Tarjetas) */
 .empty { border-left: 4px solid var(--st-empty); }
 
 .converting {
     border-left: 4px solid var(--st-converting);
-    box-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
+    box-shadow: 0 0 20px var(--accent-glow);
     animation: pulseBorder 1.5s infinite;
 }
 .converting .disc-info p { color: var(--st-converting); font-weight: bold; }
@@ -238,13 +244,15 @@ progress::-webkit-progress-value { background: var(--accent); transition: width 
 
 .ready {
     border-left: 4px solid var(--st-ready);
-    background: linear-gradient(90deg, rgba(16,185,129,0.1) 0%, rgba(24,24,27,0.7) 50%);
+    background: linear-gradient(90deg, rgba(16,185,129,0.1) 0%, rgba(28,18,43,0.7) 50%);
+    border-color: rgba(16,185,129,0.2);
 }
 .ready .disc-info p { color: var(--st-ready); font-weight: bold; }
+.ready progress::-webkit-progress-value { background: var(--st-ready); }
 
 @keyframes pulseBorder {
     0% { border-left-color: var(--st-converting); }
-    50% { border-left-color: #fcd34d; }
+    50% { border-left-color: #d8b4fe; } /* Morado más claro */
     100% { border-left-color: var(--st-converting); }
 }
 
@@ -272,7 +280,8 @@ progress::-webkit-progress-value { background: var(--accent); transition: width 
     width: 100%;
     padding: 16px;
     border-radius: 14px;
-    background: linear-gradient(135deg, var(--accent), #059669);
+    /* Degradado explosivo de Morado a Verde */
+    background: linear-gradient(135deg, var(--accent), var(--secondary));
     color: #fff;
     border: none;
     font-size: 1.1rem;
