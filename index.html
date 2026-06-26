@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minecraft Music Pack Studio</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+    <h1>Minecraft Music Pack Studio</h1>
+    
+    <div class="meta-panel">
+        <div class="meta-group">
+            <label for="modName">Nombre del Mod</label>
+            <input type="text" id="modName" placeholder="Ej. Mis Canciones Favoritas" required>
+        </div>
+
+        <div class="meta-group">
+            <label for="modDesc">Descripción</label>
+            <input type="text" id="modDesc" placeholder="Ej. Reemplaza los 22 discos originales" required>
+        </div>
+
+        <div class="meta-group" style="grid-column: 1 / -1;">
+            <label for="modIcon">Imagen de Portada (pack_icon.png)</label>
+            <input type="file" id="modIcon" accept="image/png, image/jpeg" required>
+        </div>
+
+        <div class="bulk-section">
+            <label for="bulkSongs" style="margin-top:0; color: var(--primary);">📥 Cargar Canciones en Lote</label>
+            <span>Selecciona múltiples archivos de música a la vez para auto-rellenar el tablero</span>
+            <input type="file" id="bulkSongs" accept="audio/*" multiple>
+        </div>
+    </div>
+
+    <div class="discs-grid" id="discsGrid"></div>
+
+    <button id="generateBtn" class="btn-generate">Crear y Descargar .mcpack</button>
+    <div id="globalStatus"></div>
+</div>
+
+<script type="module">
+    import { encodeAudioBuffer } from 'https://esm.sh/sl-web-ogg@1.0.1';
+
+    const DISCS = [
+        "11", "13", "blocks", "cat", "chirp", "far", 
+        "mall", "mellohi", "stal", "strad", "wait", "ward", 
+        "pigstep", "otherside", "5", "relic", "precipice", 
+        "creator", "creator_music_box", "tears", "bounce", "lava_chicken"
+    ];
+
+    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0 }));
+    let conversionQueue = [];
+    let isProcessingQueue = false;
+    let audioCtx = null;
+
+    function getAudioContext() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        return audioCtx;
+    }
+
+    function initGrid() {
+        const grid = document.getElementById('discsGrid');
+        slotsData.forEach((slot, index) => {
+            const card = document.createElement('div');
+            card.className = `disc-card status-empty`;
+            card.id = `card-${index}`;
+            card.innerHTML = `
+                <div>
+                    <p class="disc-title">Disco: ${slot.discName}</p>
+                    <div class="file-name" id="name-${index}">Sin archivo asignado</div>
+                </div>
+                <div>
+                    <div class="progress-container">
+                        <progress id="progress-${index}" value="0" max="100"></progress>
+                        <span class="progress-text" id="text-${index}">0%</span>
+                    </div>
+                    <div class="card-actions">
+                        <button class="btn-card btn-subir" onclick="triggerIndividualUpload(${index})">Subir</button>
+                        <button class="btn-card btn-clear" onclick="clearSlot(${index})">×</button>
+                    </div>
+                    <input type="file" id="input-${index}" accept="audio/*" style="display:none;" onchange="handleIndividualUpload(this, ${index})">
+                </div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    window.triggerIndividualUpload = (index) => document.getElementById(`input-${index}`).click();
+    window.handleIndividualUpload = (input, index) => {
+        if (input.files.length > 0) { assignFileToSlot(input.files[0], index); input.value = ""; }
+    };
+    window.clearSlot = (index) => {
+        conversionQueue = conversionQueue.filter(item => item !== index);
+        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
+        updateCardUI(index);
+    };
+
+    document.getElementById('bulkSongs').addEventListener('change', (e) => {
+        const files = e.target.files;
+        let fileIndex = 0;
+        for (let i = 0; i < slotsData.length; i++) {
+            if (fileIndex >= files.length) break;
+            if (slotsData[i].status === 'empty' || slotsData[i].status === 'error') {
+                assignFileToSlot(files[fileIndex], i);
+                fileIndex++;
+            }
+        }
+        e.target.value = ""; 
+    });
+
+    function assignFileToSlot(file, index) {
+        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0 };
+        updateCardUI(index);
+        if (!conversionQueue.includes(index)) {
+            conversionQueue.push(index);
+            processQueue();
+        }
+    }
+
+    function updateCardUI(index) {
+        const slot = slotsData[index];
+        const card = document.getElementById(`card-${index}`);
+        const nameCell = document.getElementById(`name-${index}`);
+        const progressBar = document.getElementById(`progress-${index}`);
+        const progressText = document.getElementById(`text-${index}`);
+
+        card.className = `disc-card status-${slot.status}`;
+        progressBar.value = slot.progress;
+        progressText.innerText = `${slot.progress}%`;
+
+        if (slot.status === 'empty') {
+            nameCell.innerText = "Sin archivo asignado";
+        } else if (slot.status === 'converting') {
+            nameCell.innerText = `⏳ ${slot.file.name}`;
+        } else if (slot.status === 'ready') {
+            nameCell.innerText = `🎵 ${slot.file.name}`;
+            progressText.innerText = "Listo";
+        } else if (slot.status === 'error') {
+            nameCell.innerText = `❌ Formato no soportado`;
+            progressText.innerText = "Fallo";
+        }
+    }
+
+    async function processQueue() {
+        if (isProcessingQueue) return;
+        isProcessingQueue = true;
+
+        while (conversionQueue.length > 0) {
+            const index = conversionQueue.shift();
+            if (slotsData[index].status === 'empty') continue;
+
+            try {
+                const file = slotsData[index].file;
+                const ctx = getAudioContext();
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+                
+                slotsData[index].progress = 50;
+                updateCardUI(index);
+
+                const oggBlob = await encodeAudioBuffer(audioBuffer);
+                
+                if (slotsData[index].status !== 'empty') {
+                    slotsData[index].blob = oggBlob;
+                    slotsData[index].progress = 100;
+                    slotsData[index].status = 'ready';
+                }
+            } catch (err) {
+                console.error(err);
+                if (slotsData[index].status !== 'empty') slotsData[index].status = 'error';
+            }
+            updateCardUI(index);
+        }
+        isProcessingQueue = false;
+    }
+
+    document.getElementById('generateBtn').addEventListener('click', async () => {
+        const name = document.getElementById('modName').value;
+        const desc = document.getElementById('modDesc').value;
+        const iconFile = document.getElementById('modIcon').files[0];
+        const statusEl = document.getElementById('globalStatus');
+        const btn = document.getElementById('generateBtn');
+
+        if (!name || !desc || !iconFile) { alert("Por favor, rellena el Nombre, Descripción e Icono del Mod."); return; }
+
+        const missingDiscs = slotsData.filter(s => s.status !== 'ready').map(s => s.discName);
+        if (missingDiscs.length > 0) { alert(`Aún faltan discos por preparar: ${missingDiscs.join(', ')}`); return; }
+
+        try {
+            btn.disabled = true;
+            statusEl.innerText = "Comprimiendo mod final...";
+
+            const zip = new JSZip();
+            const manifest = {
+                format_version: 2,
+                header: { name: name, description: desc, uuid: crypto.randomUUID(), version: [1, 0, 0], min_engine_version: [1, 16, 0] },
+                modules: [{ type: "resources", uuid: crypto.randomUUID(), description: desc, version: [1, 0, 0] }]
+            };
+            zip.file("manifest.json", JSON.stringify(manifest, null, 2));
+            zip.file("pack_icon.png", iconFile);
+
+            const recordsFolder = zip.folder("sounds").folder("music").folder("game").folder("records");
+            slotsData.forEach(slot => { recordsFolder.file(`${slot.discName}.ogg`, slot.blob); });
+
+            const blob = await zip.generateAsync({ type: "blob" });
+            const downloadUrl = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = downloadUrl;
+            a.download = `${name.replace(/\s+/g, '_')}.mcpack`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(downloadUrl);
+
+            statusEl.innerText = "¡Mod creado exitosamente!";
+            statusEl.style.color = "var(--status-ready)";
+        } catch (error) {
+            statusEl.innerText = "Error crítico construyendo el archivo pack.";
+            statusEl.style.color = "var(--status-error)";
+        } finally {
+            btn.disabled = false;
+        }
+    });
+
+    document.addEventListener('DOMContentLoaded', initGrid);
+</script>
+</body>
+</html>
