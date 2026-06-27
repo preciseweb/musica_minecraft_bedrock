@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Minecraft Music Studio - Auto-Recovery</title>
+    <title>Minecraft Music Studio - Hybrid Engine</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
@@ -21,7 +21,6 @@
         }
         .ready .custom-progress-fill { background: var(--st-ready); }
         .error .custom-progress-fill { background: var(--st-error); }
-        .retrying .custom-progress-fill { background: #f59e0b; } /* Color naranja para reintentos */
     </style>
 </head>
 <body>
@@ -67,12 +66,6 @@
 </div>
 
 <script>
-    // Se silenciaron las alertas emergentes para que el Auto-Reintento trabaje sin molestarte
-    window.onerror = function(msg, url, line) {
-        console.error("Error detectado en background:", msg, "Línea:", line);
-        return false; 
-    };
-
     const DISCS = [
         "11", "13", "blocks", "cat", "chirp", "far", 
         "mall", "mellohi", "stal", "strad", "wait", "ward", 
@@ -80,10 +73,51 @@
         "creator", "creator_music_box", "tears", "bounce", "lava_chicken"
     ];
 
-    // Se añadió la variable "attempts" para contar los reintentos automáticos
-    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0, attempts: 0 }));
+    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0 }));
     let conversionQueue = [];
     let isProcessingQueue = false;
+
+    // MAGIA: Función que convierte el audio en crudo a un archivo limpio para que FFmpeg no se rompa
+    function audioBufferToWav(buffer) {
+        let numOfChan = buffer.numberOfChannels,
+            length = buffer.length * numOfChan * 2 + 44,
+            bufferArray = new ArrayBuffer(length),
+            view = new DataView(bufferArray),
+            channels = [], i, sample,
+            offset = 0,
+            pos = 0;
+
+        setUint32(0x46464952); // "RIFF"
+        setUint32(length - 8); // file length - 8
+        setUint32(0x45564157); // "WAVE"
+        setUint32(0x20746d66); // "fmt " chunk
+        setUint32(16); // length = 16
+        setUint16(1); // PCM
+        setUint16(numOfChan);
+        setUint32(buffer.sampleRate);
+        setUint32(buffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
+        setUint16(numOfChan * 2); // block-align
+        setUint16(16); // 16-bit
+        setUint32(0x61746164); // "data" - chunk
+        setUint32(length - pos - 4); // chunk length
+
+        for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
+
+        while(pos < buffer.length) {
+            for(i = 0; i < numOfChan; i++) {
+                sample = Math.max(-1, Math.min(1, channels[i][pos])); 
+                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; 
+                view.setInt16(offset, sample, true); 
+                offset += 2;
+            }
+            pos++;
+        }
+
+        return new Blob([bufferArray], {type: "audio/wav"});
+
+        function setUint16(data) { view.setUint16(offset, data, true); offset += 2; }
+        function setUint32(data) { view.setUint32(offset, data, true); offset += 4; }
+    }
 
     function initGrid() {
         const grid = document.getElementById('discsGrid');
@@ -120,7 +154,7 @@
     };
     window.clearSlot = function(index) {
         conversionQueue = conversionQueue.filter(item => item !== index);
-        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0, attempts: 0 };
+        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
         updateCardUI(index);
     };
 
@@ -138,7 +172,7 @@
     });
 
     function assignFileToSlot(file, index) {
-        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0, attempts: 0 };
+        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0 };
         updateCardUI(index);
         if (!conversionQueue.includes(index)) {
             conversionQueue.push(index);
@@ -158,13 +192,11 @@
         if (slot.status === 'empty') {
             nameText.innerText = "Vacío";
         } else if (slot.status === 'converting') {
-            nameText.innerText = `⏳ Convirtiendo: ${slot.progress}%`;
-        } else if (slot.status === 'retrying') {
-            nameText.innerText = `⚠️ Reintentando (${slot.attempts}/2)...`;
+            nameText.innerText = `⏳ Procesando: ${slot.progress}%`;
         } else if (slot.status === 'ready') {
             nameText.innerText = `🎵 Listo`;
         } else if (slot.status === 'error') {
-            nameText.innerText = `❌ Error definitivo. Sube otro archivo.`;
+            nameText.innerText = `❌ Error, archivo inválido.`;
         }
     }
 
@@ -178,19 +210,32 @@
             const index = conversionQueue.shift();
             if (slotsData[index].status === 'empty') continue;
 
-            if (slotsData[index].status !== 'retrying') {
-                slotsData[index].status = 'converting';
-                slotsData[index].progress = 0;
-            }
+            slotsData[index].status = 'converting';
+            slotsData[index].progress = 0;
             updateCardUI(index);
 
-            await new Promise(r => setTimeout(r, 500));
-
             let ffmpegInstance = null;
-            let success = false;
+            let audioCtx = null;
 
             try {
-                document.getElementById('globalStatus').innerText = `Liberando RAM para disco ${slotsData[index].discName}...`;
+                // PASO 1: Decodificación nativa (Soluciona el error del FLAC)
+                document.getElementById('globalStatus').innerText = `Leyendo audio ${slotsData[index].discName} (Nativo)...`;
+                const file = slotsData[index].file;
+                
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await file.arrayBuffer();
+                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                
+                const wavBlob = audioBufferToWav(audioBuffer);
+                
+                // Limpiamos la memoria nativa
+                audioCtx.close();
+                
+                slotsData[index].progress = 25;
+                updateCardUI(index);
+
+                // PASO 2: Entregamos el archivo limpio a FFmpeg
+                document.getElementById('globalStatus').innerText = `Comprimiendo a formato Minecraft...`;
                 
                 ffmpegInstance = createFFmpeg({ 
                     corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js',
@@ -198,47 +243,29 @@
                 });
 
                 ffmpegInstance.setProgress(({ ratio }) => {
-                    let pct = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+                    let pct = 25 + Math.round(Math.max(0, Math.min(1, ratio)) * 75);
                     slotsData[index].progress = pct;
                     updateCardUI(index);
                 });
 
                 await ffmpegInstance.load();
-                document.getElementById('globalStatus').innerText = `✅ Procesando disco ${slotsData[index].discName}`;
 
-                const file = slotsData[index].file;
-                const ext = file.name.split('.').pop() || 'mp3';
-                const inputName = `input_${index}.${ext}`;
+                const inputName = `input_${index}.wav`;
                 const outputName = `out_${index}.ogg`;
 
-                ffmpegInstance.FS('writeFile', inputName, await fetchFile(file));
+                // Aquí ya no se usa el archivo original (.flac), sino el .wav limpio, evitando el bug
+                ffmpegInstance.FS('writeFile', inputName, await fetchFile(wavBlob));
                 
-                // Sistema de Watchdog (Tiempo máximo: 120 segundos por canción para evitar cuelgues)
-                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_HANG')), 120000));
-                
-                await Promise.race([
-                    ffmpegInstance.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName),
-                    timeoutPromise
-                ]);
+                await ffmpegInstance.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName);
                 
                 const data = ffmpegInstance.FS('readFile', outputName);
                 slotsData[index].blob = data.buffer;
                 slotsData[index].status = 'ready';
                 slotsData[index].progress = 100;
-                success = true;
 
             } catch (err) {
                 console.error("Fallo detectado en disco " + index, err);
-                slotsData[index].attempts++;
-                
-                // Si falla, lo vuelve a intentar automáticamente hasta 2 veces más
-                if (slotsData[index].attempts <= 2) {
-                    slotsData[index].status = 'retrying';
-                    slotsData[index].progress = 0;
-                    conversionQueue.unshift(index); // Lo regresa al principio de la fila
-                } else {
-                    slotsData[index].status = 'error';
-                }
+                slotsData[index].status = 'error';
             } finally {
                 if (ffmpegInstance) {
                     try { ffmpegInstance.exit(); } catch(e) {}
@@ -249,7 +276,7 @@
         }
         
         isProcessingQueue = false;
-        document.getElementById('globalStatus').innerText = "✅ Proceso completado";
+        document.getElementById('globalStatus').innerText = "✅ Audios procesados";
     }
 
     document.getElementById('generateBtn').addEventListener('click', async () => {
