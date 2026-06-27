@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Minecraft Music Studio</title>
+    <title>Minecraft Music Studio - Universal</title>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
+    
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -44,11 +47,17 @@
 </main>
 
 <div class="bottom-bar glass">
-    <div id="globalStatus">Iniciando sistema...</div>
+    <div id="globalStatus">Esperando audios...</div>
     <button id="generateBtn" class="btn-generate">🚀 Empaquetar Mod</button>
 </div>
 
 <script>
+    // Detector de errores global (Te avisará si algo sale mal)
+    window.onerror = function(msg, url, line) {
+        alert("Detectamos un problema:\n" + msg + "\nLínea: " + line);
+        return false; 
+    };
+
     const DISCS = [
         "11", "13", "blocks", "cat", "chirp", "far", 
         "mall", "mellohi", "stal", "strad", "wait", "ward", 
@@ -59,26 +68,22 @@
     let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0 }));
     let conversionQueue = [];
     let isProcessingQueue = false;
-    let audioCtx = null;
-    let encodeAudioBuffer = null;
+    let activeConvertingIndex = null;
 
-    // Carga SEGURA del convertidor de audio
-    import('https://esm.sh/sl-web-ogg@1.0.1')
-        .then(module => {
-            encodeAudioBuffer = module.encodeAudioBuffer;
-            document.getElementById('globalStatus').innerText = "✅ Listo para procesar audios";
-        })
-        .catch(err => {
-            document.getElementById('globalStatus').innerText = "⚠️ Convertidor Bloqueado por Brave";
-            document.getElementById('globalStatus').style.color = "#ef4444";
-            alert("¡Hola! Tu navegador Brave está bloqueando el convertidor de audio. Por favor, pulsa el ícono del león en la barra de direcciones, apaga los escudos para esta página y recarga.");
-        });
+    // Inicializar FFmpeg Universal
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ 
+        corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js',
+        log: false 
+    });
 
-    function getAudioContext() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        return audioCtx;
-    }
+    ffmpeg.setProgress(({ ratio }) => {
+        if (activeConvertingIndex !== null) {
+            let pct = Math.round(Math.max(0, Math.min(1, ratio)) * 100);
+            slotsData[activeConvertingIndex].progress = pct;
+            updateCardUI(activeConvertingIndex);
+        }
+    });
 
     function initGrid() {
         const grid = document.getElementById('discsGrid');
@@ -109,18 +114,16 @@
         });
     }
 
-    // Funciones globales estándar
-    function triggerIndividualUpload(index) { document.getElementById(`input-${index}`).click(); }
-    
-    function handleIndividualUpload(input, index) {
+    // Funciones Globales Protegidas
+    window.triggerIndividualUpload = function(index) { document.getElementById(`input-${index}`).click(); };
+    window.handleIndividualUpload = function(input, index) {
         if (input.files.length > 0) { assignFileToSlot(input.files[0], index); input.value = ""; }
-    }
-    
-    function clearSlot(index) {
+    };
+    window.clearSlot = function(index) {
         conversionQueue = conversionQueue.filter(item => item !== index);
         slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
         updateCardUI(index);
-    }
+    };
 
     document.getElementById('bulkSongs').addEventListener('change', (e) => {
         const files = e.target.files;
@@ -156,11 +159,11 @@
         if (slot.status === 'empty') {
             nameText.innerText = "Vacío";
         } else if (slot.status === 'converting') {
-            nameText.innerText = `⏳ Procesando...`;
+            nameText.innerText = `⏳ Procesando (El celular podría congelarse un poco)...`;
         } else if (slot.status === 'ready') {
             nameText.innerText = `🎵 Listo: ${slot.file.name}`;
         } else if (slot.status === 'error') {
-            nameText.innerText = `❌ Audio no válido`;
+            nameText.innerText = `❌ Error, intenta con otra canción`;
         }
     }
 
@@ -168,38 +171,56 @@
         if (isProcessingQueue) return;
         isProcessingQueue = true;
 
+        try {
+            if (!ffmpeg.isLoaded()) {
+                document.getElementById('globalStatus').innerText = "Cargando motor de conversión...";
+                await ffmpeg.load();
+                document.getElementById('globalStatus').innerText = "✅ Motor listo";
+            }
+        } catch (err) {
+            alert("Error cargando el motor de audio: " + err.message);
+            isProcessingQueue = false;
+            return;
+        }
+
         while (conversionQueue.length > 0) {
             const index = conversionQueue.shift();
             if (slotsData[index].status === 'empty') continue;
 
-            // Verificación extra: Si Brave bloqueó la herramienta, te avisa aquí
-            if (!encodeAudioBuffer) {
-                alert("¡El convertidor está bloqueado! Apaga el escudo de privacidad de Brave (el icono del león) para que funcione.");
-                slotsData[index].status = 'error';
-                updateCardUI(index);
-                continue;
-            }
+            activeConvertingIndex = index;
+            slotsData[index].status = 'converting';
+            updateCardUI(index);
+
+            // Pausa de 200ms para que el celular alcance a pintar la pantalla antes de ponerse a procesar
+            await new Promise(r => setTimeout(r, 200));
 
             try {
                 const file = slotsData[index].file;
-                const ctx = getAudioContext();
-                const arrayBuffer = await file.arrayBuffer();
-                const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-                
-                slotsData[index].progress = 50;
-                updateCardUI(index);
+                // Sacamos la extensión real para que no se corrompa
+                const ext = file.name.split('.').pop() || 'mp3';
+                const inputName = `input_${index}.${ext}`;
+                const outputName = `${slotsData[index].discName}.ogg`;
 
-                const oggBlob = await encodeAudioBuffer(audioBuffer);
+                ffmpeg.FS('writeFile', inputName, await fetchFile(file));
                 
-                if (slotsData[index].status !== 'empty') {
-                    slotsData[index].blob = oggBlob;
-                    slotsData[index].progress = 100;
-                    slotsData[index].status = 'ready';
-                }
+                // Conversión de audio ultra ligera y compatible
+                await ffmpeg.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName);
+                
+                const data = ffmpeg.FS('readFile', outputName);
+                slotsData[index].blob = data.buffer;
+                slotsData[index].status = 'ready';
+                slotsData[index].progress = 100;
+
+                try { ffmpeg.FS('unlink', inputName); } catch(e){}
+                try { ffmpeg.FS('unlink', outputName); } catch(e){}
+
             } catch (err) {
                 console.error(err);
-                if (slotsData[index].status !== 'empty') slotsData[index].status = 'error';
+                slotsData[index].status = 'error';
+                alert(`Hubo un error convirtiendo el disco ${slotsData[index].discName}.\nMensaje: ${err.message}`);
             }
+            
+            activeConvertingIndex = null;
             updateCardUI(index);
         }
         isProcessingQueue = false;
@@ -215,7 +236,7 @@
         if (!name || !desc || !iconFile) { alert("Completa el Nombre, Descripción e Icono."); return; }
 
         const missingDiscs = slotsData.filter(s => s.status !== 'ready').map(s => s.discName);
-        if (missingDiscs.length > 0) { alert(`Aún faltan discos: ${missingDiscs.join(', ')}`); return; }
+        if (missingDiscs.length > 0) { alert(`Aún faltan discos por llenar: ${missingDiscs.join(', ')}`); return; }
 
         try {
             btn.disabled = true;
@@ -266,7 +287,7 @@
             statusEl.style.color = "#ef4444";
         } finally {
             btn.disabled = false;
-            setTimeout(() => { statusEl.innerText = "✅ Listo para procesar audios"; statusEl.style.color = "var(--text-sub)"; }, 3000);
+            setTimeout(() => { statusEl.innerText = "✅ Motor listo"; statusEl.style.color = "var(--text-sub)"; }, 3000);
         }
     });
 
