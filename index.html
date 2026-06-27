@@ -44,14 +44,11 @@
 </main>
 
 <div class="bottom-bar glass">
-    <div id="globalStatus">Esperando audios...</div>
+    <div id="globalStatus">Iniciando sistema...</div>
     <button id="generateBtn" class="btn-generate">🚀 Empaquetar Mod</button>
 </div>
 
-<script type="module">
-    import { encodeAudioBuffer } from 'https://esm.sh/sl-web-ogg@1.0.1';
-
-    // Lista oficial de los 22 discos (Actualizada a las últimas versiones)
+<script>
     const DISCS = [
         "11", "13", "blocks", "cat", "chirp", "far", 
         "mall", "mellohi", "stal", "strad", "wait", "ward", 
@@ -63,6 +60,19 @@
     let conversionQueue = [];
     let isProcessingQueue = false;
     let audioCtx = null;
+    let encodeAudioBuffer = null;
+
+    // Carga SEGURA del convertidor de audio
+    import('https://esm.sh/sl-web-ogg@1.0.1')
+        .then(module => {
+            encodeAudioBuffer = module.encodeAudioBuffer;
+            document.getElementById('globalStatus').innerText = "✅ Listo para procesar audios";
+        })
+        .catch(err => {
+            document.getElementById('globalStatus').innerText = "⚠️ Convertidor Bloqueado por Brave";
+            document.getElementById('globalStatus').style.color = "#ef4444";
+            alert("¡Hola! Tu navegador Brave está bloqueando el convertidor de audio. Por favor, pulsa el ícono del león en la barra de direcciones, apaga los escudos para esta página y recarga.");
+        });
 
     function getAudioContext() {
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -70,7 +80,6 @@
         return audioCtx;
     }
 
-    // Inicializador de Interfaz Mobile
     function initGrid() {
         const grid = document.getElementById('discsGrid');
         slotsData.forEach((slot, index) => {
@@ -100,16 +109,18 @@
         });
     }
 
-    // Funciones Globales para el HTML
-    window.triggerIndividualUpload = (index) => document.getElementById(`input-${index}`).click();
-    window.handleIndividualUpload = (input, index) => {
+    // Funciones globales estándar
+    function triggerIndividualUpload(index) { document.getElementById(`input-${index}`).click(); }
+    
+    function handleIndividualUpload(input, index) {
         if (input.files.length > 0) { assignFileToSlot(input.files[0], index); input.value = ""; }
-    };
-    window.clearSlot = (index) => {
+    }
+    
+    function clearSlot(index) {
         conversionQueue = conversionQueue.filter(item => item !== index);
         slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
         updateCardUI(index);
-    };
+    }
 
     document.getElementById('bulkSongs').addEventListener('change', (e) => {
         const files = e.target.files;
@@ -153,7 +164,6 @@
         }
     }
 
-    // Motor de Audio Ultra Rápido NATIVO
     async function processQueue() {
         if (isProcessingQueue) return;
         isProcessingQueue = true;
@@ -161,6 +171,14 @@
         while (conversionQueue.length > 0) {
             const index = conversionQueue.shift();
             if (slotsData[index].status === 'empty') continue;
+
+            // Verificación extra: Si Brave bloqueó la herramienta, te avisa aquí
+            if (!encodeAudioBuffer) {
+                alert("¡El convertidor está bloqueado! Apaga el escudo de privacidad de Brave (el icono del león) para que funcione.");
+                slotsData[index].status = 'error';
+                updateCardUI(index);
+                continue;
+            }
 
             try {
                 const file = slotsData[index].file;
@@ -205,7 +223,6 @@
 
             const zip = new JSZip();
             
-            // Manifest.json
             const manifest = {
                 format_version: 2,
                 header: { name: name, description: desc, uuid: crypto.randomUUID(), version: [1, 0, 0], min_engine_version: [1, 16, 0] },
@@ -214,7 +231,6 @@
             zip.file("manifest.json", JSON.stringify(manifest, null, 2));
             zip.file("pack_icon.png", iconFile);
 
-            // ¡AQUÍ ESTÁ LA MAGIA QUE ARREGLA EL JUEGO! (sound_definitions.json)
             const soundDefinitions = {
                 format_version: "1.21.0",
                 sound_definitions: {}
@@ -223,21 +239,16 @@
             const recordsFolder = zip.folder("sounds").folder("music").folder("game").folder("records");
             
             slotsData.forEach(slot => {
-                // Escribir el audio ogg
                 recordsFolder.file(`${slot.discName}.ogg`, slot.blob);
-                
-                // Forzar a Minecraft Bedrock a leerlo
                 soundDefinitions.sound_definitions[`record.${slot.discName}`] = {
                     category: "record",
                     stream: true,
-                    sounds: [`sounds/music/game/records/${slot.discName}`] // Obligatorio SIN .ogg
+                    sounds: [`sounds/music/game/records/${slot.discName}`]
                 };
             });
 
-            // Guardar el mapa de sonidos
             zip.folder("sounds").file("sound_definitions.json", JSON.stringify(soundDefinitions, null, 2));
 
-            // Descarga final
             const blob = await zip.generateAsync({ type: "blob" });
             const downloadUrl = URL.createObjectURL(blob);
             const a = document.createElement("a");
@@ -255,7 +266,7 @@
             statusEl.style.color = "#ef4444";
         } finally {
             btn.disabled = false;
-            setTimeout(() => { statusEl.innerText = "Esperando audios..."; statusEl.style.color = "var(--text-sub)"; }, 3000);
+            setTimeout(() => { statusEl.innerText = "✅ Listo para procesar audios"; statusEl.style.color = "var(--text-sub)"; }, 3000);
         }
     });
 
