@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Minecraft Music Studio - Anti-Crash</title>
+    <title>Minecraft Music Studio - Auto-Recovery</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
@@ -21,6 +21,7 @@
         }
         .ready .custom-progress-fill { background: var(--st-ready); }
         .error .custom-progress-fill { background: var(--st-error); }
+        .retrying .custom-progress-fill { background: #f59e0b; } /* Color naranja para reintentos */
     </style>
 </head>
 <body>
@@ -51,6 +52,7 @@
         <div class="bulk-content">
             <h3>📥 Carga Rápida en Lote</h3>
             <p>Selecciona varios archivos a la vez para llenar los discos automáticamente.</p>
+            <p style="color: var(--accent); font-weight: 800; margin-top: -5px; font-size: 0.95rem;">⚠️ Límite: Solo se pueden subir 22 canciones.</p>
             <label for="bulkSongs" class="btn-action primary-glow">Elegir Múltiples Audios</label>
             <input type="file" id="bulkSongs" accept="audio/*" multiple style="display:none;">
         </div>
@@ -65,6 +67,12 @@
 </div>
 
 <script>
+    // Se silenciaron las alertas emergentes para que el Auto-Reintento trabaje sin molestarte
+    window.onerror = function(msg, url, line) {
+        console.error("Error detectado en background:", msg, "Línea:", line);
+        return false; 
+    };
+
     const DISCS = [
         "11", "13", "blocks", "cat", "chirp", "far", 
         "mall", "mellohi", "stal", "strad", "wait", "ward", 
@@ -72,7 +80,8 @@
         "creator", "creator_music_box", "tears", "bounce", "lava_chicken"
     ];
 
-    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0 }));
+    // Se añadió la variable "attempts" para contar los reintentos automáticos
+    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0, attempts: 0 }));
     let conversionQueue = [];
     let isProcessingQueue = false;
 
@@ -111,7 +120,7 @@
     };
     window.clearSlot = function(index) {
         conversionQueue = conversionQueue.filter(item => item !== index);
-        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
+        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0, attempts: 0 };
         updateCardUI(index);
     };
 
@@ -129,7 +138,7 @@
     });
 
     function assignFileToSlot(file, index) {
-        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0 };
+        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0, attempts: 0 };
         updateCardUI(index);
         if (!conversionQueue.includes(index)) {
             conversionQueue.push(index);
@@ -150,14 +159,15 @@
             nameText.innerText = "Vacío";
         } else if (slot.status === 'converting') {
             nameText.innerText = `⏳ Convirtiendo: ${slot.progress}%`;
+        } else if (slot.status === 'retrying') {
+            nameText.innerText = `⚠️ Reintentando (${slot.attempts}/2)...`;
         } else if (slot.status === 'ready') {
             nameText.innerText = `🎵 Listo`;
         } else if (slot.status === 'error') {
-            nameText.innerText = `❌ Error de memoria, reintenta`;
+            nameText.innerText = `❌ Error definitivo. Sube otro archivo.`;
         }
     }
 
-    // EL NUEVO CEREBRO: Crea y destruye el convertidor por cada canción para que la RAM nunca se llene
     async function processQueue() {
         if (isProcessingQueue) return;
         isProcessingQueue = true;
@@ -168,18 +178,19 @@
             const index = conversionQueue.shift();
             if (slotsData[index].status === 'empty') continue;
 
-            slotsData[index].status = 'converting';
-            slotsData[index].progress = 0;
+            if (slotsData[index].status !== 'retrying') {
+                slotsData[index].status = 'converting';
+                slotsData[index].progress = 0;
+            }
             updateCardUI(index);
 
-            // Damos 500ms al celular para respirar y actualizar la pantalla
             await new Promise(r => setTimeout(r, 500));
 
             let ffmpegInstance = null;
+            let success = false;
 
             try {
-                // 1. Crear una instancia fresca y limpia
-                document.getElementById('globalStatus').innerText = `Liberando RAM para el disco ${slotsData[index].discName}...`;
+                document.getElementById('globalStatus').innerText = `Liberando RAM para disco ${slotsData[index].discName}...`;
                 
                 ffmpegInstance = createFFmpeg({ 
                     corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js',
@@ -202,30 +213,43 @@
 
                 ffmpegInstance.FS('writeFile', inputName, await fetchFile(file));
                 
-                // 2. Ejecutar conversión
-                await ffmpegInstance.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName);
+                // Sistema de Watchdog (Tiempo máximo: 120 segundos por canción para evitar cuelgues)
+                const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('TIMEOUT_HANG')), 120000));
+                
+                await Promise.race([
+                    ffmpegInstance.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName),
+                    timeoutPromise
+                ]);
                 
                 const data = ffmpegInstance.FS('readFile', outputName);
                 slotsData[index].blob = data.buffer;
                 slotsData[index].status = 'ready';
                 slotsData[index].progress = 100;
+                success = true;
 
             } catch (err) {
-                console.error("Fallo en disco " + index, err);
-                slotsData[index].status = 'error';
+                console.error("Fallo detectado en disco " + index, err);
+                slotsData[index].attempts++;
+                
+                // Si falla, lo vuelve a intentar automáticamente hasta 2 veces más
+                if (slotsData[index].attempts <= 2) {
+                    slotsData[index].status = 'retrying';
+                    slotsData[index].progress = 0;
+                    conversionQueue.unshift(index); // Lo regresa al principio de la fila
+                } else {
+                    slotsData[index].status = 'error';
+                }
             } finally {
-                // 3. LA MAGIA: Forzamos la destrucción de la instancia para vaciar la memoria RAM
                 if (ffmpegInstance) {
-                    try { ffmpegInstance.exit(); } catch(e) { console.log("Instancia cerrada"); }
+                    try { ffmpegInstance.exit(); } catch(e) {}
                 }
                 updateCardUI(index);
-                // Le damos al celular 1 segundo entero para limpiar su basura de la memoria
                 await new Promise(r => setTimeout(r, 1000));
             }
         }
         
         isProcessingQueue = false;
-        document.getElementById('globalStatus').innerText = "✅ Todos los audios procesados";
+        document.getElementById('globalStatus').innerText = "✅ Proceso completado";
     }
 
     document.getElementById('generateBtn').addEventListener('click', async () => {
