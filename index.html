@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Minecraft Music Studio - Hybrid Engine</title>
+    <title>Minecraft Music Studio - Anti-FLAC Bug</title>
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
@@ -77,29 +77,18 @@
     let conversionQueue = [];
     let isProcessingQueue = false;
 
-    // MAGIA: Función que convierte el audio en crudo a un archivo limpio para que FFmpeg no se rompa
+    // Puente Nativo
     function audioBufferToWav(buffer) {
         let numOfChan = buffer.numberOfChannels,
             length = buffer.length * numOfChan * 2 + 44,
             bufferArray = new ArrayBuffer(length),
             view = new DataView(bufferArray),
-            channels = [], i, sample,
-            offset = 0,
-            pos = 0;
+            channels = [], i, sample, offset = 0, pos = 0;
 
-        setUint32(0x46464952); // "RIFF"
-        setUint32(length - 8); // file length - 8
-        setUint32(0x45564157); // "WAVE"
-        setUint32(0x20746d66); // "fmt " chunk
-        setUint32(16); // length = 16
-        setUint16(1); // PCM
-        setUint16(numOfChan);
-        setUint32(buffer.sampleRate);
-        setUint32(buffer.sampleRate * 2 * numOfChan); // avg. bytes/sec
-        setUint16(numOfChan * 2); // block-align
-        setUint16(16); // 16-bit
-        setUint32(0x61746164); // "data" - chunk
-        setUint32(length - pos - 4); // chunk length
+        setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
+        setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(buffer.sampleRate);
+        setUint32(buffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2); setUint16(16);
+        setUint32(0x61746164); setUint32(length - pos - 4);
 
         for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
 
@@ -107,16 +96,26 @@
             for(i = 0; i < numOfChan; i++) {
                 sample = Math.max(-1, Math.min(1, channels[i][pos])); 
                 sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; 
-                view.setInt16(offset, sample, true); 
-                offset += 2;
+                view.setInt16(offset, sample, true); offset += 2;
             }
             pos++;
         }
-
         return new Blob([bufferArray], {type: "audio/wav"});
 
         function setUint16(data) { view.setUint16(offset, data, true); offset += 2; }
         function setUint32(data) { view.setUint32(offset, data, true); offset += 4; }
+    }
+
+    // Lector Nativo Aislado
+    async function decodeNatively(file) {
+        let ctx = new (window.AudioContext || window.webkitAudioContext)();
+        try {
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+            return audioBufferToWav(audioBuffer);
+        } finally {
+            if (ctx.state !== 'closed') ctx.close();
+        }
     }
 
     function initGrid() {
@@ -215,26 +214,31 @@
             updateCardUI(index);
 
             let ffmpegInstance = null;
-            let audioCtx = null;
 
             try {
-                // PASO 1: Decodificación nativa (Soluciona el error del FLAC)
-                document.getElementById('globalStatus').innerText = `Leyendo audio ${slotsData[index].discName} (Nativo)...`;
                 const file = slotsData[index].file;
+                const ext = file.name.split('.').pop().toLowerCase();
                 
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const arrayBuffer = await file.arrayBuffer();
-                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                
-                const wavBlob = audioBufferToWav(audioBuffer);
-                
-                // Limpiamos la memoria nativa
-                audioCtx.close();
+                let fileToProcess = file;
+                let inputExt = ext;
+
+                // 1. Detección Inteligente de FLAC
+                if (ext !== 'flac') {
+                    try {
+                        document.getElementById('globalStatus').innerText = `Leyendo audio ${slotsData[index].discName} (Nativo)...`;
+                        fileToProcess = await decodeNatively(file);
+                        inputExt = 'wav';
+                    } catch (e) {
+                        console.log("Decodificación nativa falló, usando archivo original.");
+                    }
+                } else {
+                    document.getElementById('globalStatus').innerText = `Preparando FLAC ${slotsData[index].discName}...`;
+                }
                 
                 slotsData[index].progress = 25;
                 updateCardUI(index);
 
-                // PASO 2: Entregamos el archivo limpio a FFmpeg
+                // 2. FFmpeg Blindado
                 document.getElementById('globalStatus').innerText = `Comprimiendo a formato Minecraft...`;
                 
                 ffmpegInstance = createFFmpeg({ 
@@ -250,13 +254,13 @@
 
                 await ffmpegInstance.load();
 
-                const inputName = `input_${index}.wav`;
+                const inputName = `input_${index}.${inputExt}`;
                 const outputName = `out_${index}.ogg`;
 
-                // Aquí ya no se usa el archivo original (.flac), sino el .wav limpio, evitando el bug
-                ffmpegInstance.FS('writeFile', inputName, await fetchFile(wavBlob));
+                ffmpegInstance.FS('writeFile', inputName, await fetchFile(fileToProcess));
                 
-                await ffmpegInstance.run('-i', inputName, '-c:a', 'libvorbis', '-q:a', '2', outputName);
+                // COMANDO ANTI-CRASH: -vn (quita portada) -map_metadata -1 (quita tags corruptos) -ar 44100 (estandariza)
+                await ffmpegInstance.run('-i', inputName, '-vn', '-map_metadata', '-1', '-ar', '44100', '-c:a', 'libvorbis', '-q:a', '2', outputName);
                 
                 const data = ffmpegInstance.FS('readFile', outputName);
                 slotsData[index].blob = data.buffer;
