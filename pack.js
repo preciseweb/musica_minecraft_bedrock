@@ -13,8 +13,8 @@ export function discTexturePath(disc) {
   return `textures/items/${MODERN_TEXTURE_DISCS.has(disc) ? 'music_disc' : 'record'}_${disc}.png`;
 }
 export const AUDIO_ACCEPT = 'audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.webm,.aiff,.wma';
-export const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
-export const MAX_TOTAL_BYTES = 250 * 1024 * 1024;
+// FFmpeg's WebAssembly build has a 2 GiB input ceiling. There is no selection-wide cap.
+export const MAX_AUDIO_BYTES = 2 * 1024 * 1024 * 1024 - 1;
 export const MAX_ICON_BYTES = 10 * 1024 * 1024;
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aac', 'opus', 'webm', 'aif', 'aiff', 'wma', 'oga', 'mp4']);
 
@@ -24,7 +24,7 @@ export function buildDescription(description) {
 
 export function validateAudio(file) {
   if (!file || !file.size) return 'El archivo está vacío.';
-  if (file.size > MAX_AUDIO_BYTES) return 'Cada audio puede pesar hasta 100 MB.';
+  if (file.size > MAX_AUDIO_BYTES) return 'Cada audio debe pesar menos de 2 GB, el límite técnico del conversor del navegador.';
   const extension = file.name.split('.').pop().toLowerCase();
   if (!file.type.startsWith('audio/') && !AUDIO_EXTENSIONS.has(extension)) return 'Selecciona un archivo de audio compatible.';
   return '';

@@ -47,27 +47,43 @@ export class AudioConverter {
   async convert(file, onProgress, onStage, isCurrent = () => true) {
     const instance = await this.load(onStage);
     if (!isCurrent()) throw new Error('Conversión cancelada.');
-    const input = 'input.audio';
+    const inputDirectory = '/input';
+    const input = `${inputDirectory}/input.audio`;
     const output = 'output.ogg';
+    let directoryCreated = false;
+    let mounted = false;
     const progressListener = ({ progress }) => {
       if (Number.isFinite(progress)) onProgress(Math.min(99, Math.max(3, Math.round(progress * 100))));
     };
     instance.on('progress', progressListener);
     try {
       onStage('Convirtiendo tu canción…');
-      await instance.writeFile(input, new Uint8Array(await file.arrayBuffer()));
+      await instance.createDir(inputDirectory);
+      directoryCreated = true;
+      // WORKERFS reads the original Blob in chunks instead of duplicating the
+      // entire song in FFmpeg's memory. Keep the virtual filename predictable.
+      mounted = await instance.mount('WORKERFS', {
+        blobs: [{ name: 'input.audio', data: file }]
+      }, inputDirectory);
+      if (!mounted) throw new Error('El conversor no pudo abrir el archivo de audio.');
       if (!isCurrent()) throw new Error('Conversión cancelada.');
       const code = await instance.exec([
         '-i', input, '-map', '0:a:0', '-vn', '-map_metadata', '-1',
         '-ar', '44100', '-ac', '2', '-c:a', 'libvorbis', '-q:a', '3', '-y', output
-      ], 5 * 60 * 1000);
+      ]);
       if (code !== 0) throw new Error('No se pudo convertir. Prueba otro archivo de audio.');
       const data = await instance.readFile(output);
       return new Blob([data], { type: 'audio/ogg' });
     } finally {
       instance.off('progress', progressListener);
       if (instance.loaded) {
-        await Promise.allSettled([instance.deleteFile(input), instance.deleteFile(output)]);
+        await Promise.allSettled([
+          instance.deleteFile(output),
+          ...(mounted ? [instance.unmount(inputDirectory)] : [])
+        ]);
+        if (directoryCreated && instance.loaded) {
+          await instance.deleteDir(inputDirectory).catch(() => {});
+        }
       }
     }
   }

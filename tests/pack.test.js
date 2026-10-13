@@ -36,7 +36,9 @@ test('audio and cover validation rejects empty, oversized and incompatible files
   assert.equal(validateAudio(file('recording', 'audio/ogg')), '');
   assert.equal(validateAudio(file('video.mp4', 'video/mp4')), '');
   assert.match(validateAudio(file('song.wav', 'audio/wav', 0)), /vacío/);
-  assert.match(validateAudio(file('song.wav', 'audio/wav', MAX_AUDIO_BYTES + 1)), /100 MB/);
+  assert.equal(validateAudio(file('song.wav', 'audio/wav', 512 * 1024 * 1024)), '');
+  assert.equal(validateAudio(file('song.wav', 'audio/wav', MAX_AUDIO_BYTES)), '');
+  assert.match(validateAudio(file('song.wav', 'audio/wav', 2 * 1024 * 1024 * 1024)), /2 GB/);
   assert.match(validateAudio(file('document.pdf', 'application/pdf')), /audio compatible/);
   for (const type of ['image/png', 'image/jpeg', 'image/webp']) {
     assert.equal(validateIcon(file('cover', type)), '');

@@ -1,4 +1,4 @@
-import { DISCS, DISC_CATALOG, AUDIO_ACCEPT, MAX_TOTAL_BYTES, buildDescription, buildPackMetadata, discTexturePath, downloadFilename, validateAudio, validateIcon } from './pack.js';
+import { DISCS, DISC_CATALOG, AUDIO_ACCEPT, buildDescription, buildPackMetadata, discTexturePath, downloadFilename, validateAudio, validateIcon } from './pack.js';
 import { AudioConverter } from './converter.js';
 import { extractSongCover, makePngCover } from './artwork.js';
 import { SOCIAL_LINKS } from './social-links.js';
@@ -196,11 +196,6 @@ function assignFile(file, index, announce = true) {
   const validationError = validateAudio(file);
   if (validationError) {
     showNotice(`${file.name}: ${validationError}`, true);
-    return false;
-  }
-  const total = slots.reduce((sum, slot, slotIndex) => sum + (slotIndex === index ? 0 : slot.file?.size || 0), file.size);
-  if (total > MAX_TOTAL_BYTES) {
-    showNotice('La selección puede pesar hasta 250 MB en total. Elimina un audio antes de añadir más.', true);
     return false;
   }
   clearSlot(index, false);

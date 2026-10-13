@@ -24,6 +24,30 @@ function wavFile(name = 'cancion.wav', frequency = 440) {
   return { name, mimeType: 'audio/wav', buffer };
 }
 
+// Valid PCM audio plus an ancillary RIFF chunk makes a large upload without a
+// minutes-long test recording or a large Node-to-browser message.
+async function uploadPaddedWavs(page, selector, paddingMiB, count = 1) {
+  return page.evaluate(({ selector, paddingMiB, count, wavBytes }) => {
+    const wav = new Uint8Array(wavBytes);
+    const paddingSize = paddingMiB * 1024 * 1024;
+    new DataView(wav.buffer).setUint32(4, wav.length + paddingSize, true);
+    const chunk = new Uint8Array([0x4a, 0x55, 0x4e, 0x4b, 0, 0, 0, 0]);
+    new DataView(chunk.buffer).setUint32(4, paddingSize, true);
+    const block = new Blob([new Uint8Array(1024 * 1024)]);
+    const padding = new Blob(Array(paddingMiB).fill(block));
+    const recording = new Blob([wav, chunk, padding], { type: 'audio/wav' });
+    const transfer = new DataTransfer();
+    for (let index = 0; index < count; index += 1) {
+      transfer.items.add(new File([recording], `cancion-grande-${index + 1}.wav`, { type: 'audio/wav' }));
+    }
+    const totalBytes = Array.from(transfer.files).reduce((sum, file) => sum + file.size, 0);
+    const input = document.querySelector(selector);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    return totalBytes;
+  }, { selector, paddingMiB, count, wavBytes: Array.from(wavFile().buffer) });
+}
+
 async function jpegCover(page) {
   const base64 = await page.evaluate(() => {
     const canvas = document.createElement('canvas');
@@ -227,6 +251,77 @@ test('invalid and excess uploads explain what happened without silently replacin
   await expect(page.locator('#card-21 .file-name')).toHaveText('cancion-22.wav');
   await page.locator('#clearAllBtn').click();
   await expect(page.locator('#selectedCount')).toHaveText('0');
+});
+
+test('all 22 discs convert a selection above 250 MiB and download a complete pack', async ({ page }) => {
+  let releaseCore;
+  let startedCore;
+  const coreGate = new Promise((resolve) => { releaseCore = resolve; });
+  const coreStarted = new Promise((resolve) => { startedCore = resolve; });
+  await page.route('**/ffmpeg-core.js', async (route) => {
+    startedCore();
+    await coreGate;
+    await route.continue().catch(() => {});
+  });
+  await page.goto('/');
+  await configurePack(page, 'Todos los discos');
+  try {
+    const totalBytes = await uploadPaddedWavs(page, '#bulkSongs', 13, 22);
+    expect(totalBytes).toBeGreaterThan(250 * 1024 * 1024);
+    await coreStarted;
+    await expect(page.locator('#selectedCount')).toHaveText('22');
+    await expect(page.locator('.disc-card:not(.empty)')).toHaveCount(22);
+    await expect(page.locator('#notice')).toHaveText('22 canciones añadidas.');
+    await expect(page.locator('#card-21 .file-name')).toHaveText('cancion-grande-22.wav');
+    releaseCore();
+    await expect(page.locator('#readyCount')).toHaveText('22');
+    await expect(page.locator('.disc-card.ready')).toHaveCount(22);
+    const { zip } = await downloadZip(page);
+    const oggFiles = Object.values(zip.files).filter((file) => !file.dir && file.name.endsWith('.ogg'));
+    expect(oggFiles).toHaveLength(22);
+    for (const file of oggFiles) {
+      const bytes = await file.async('nodebuffer');
+      expect(bytes.subarray(0, 4).toString()).toBe('OggS');
+      expect(bytes.length).toBeGreaterThan(100);
+    }
+    const { sound_definitions } = JSON.parse(await zip.file('sounds/sound_definitions.json').async('string'));
+    expect(Object.keys(sound_definitions)).toHaveLength(22);
+    for (const definition of Object.values(sound_definitions)) {
+      expect(zip.file(`${definition.sounds[0].name}.ogg`)).not.toBeNull();
+    }
+    await page.locator('#clearAllBtn').click();
+    await expect(page.locator('#selectedCount')).toHaveText('0');
+    await expect(page.locator('.disc-card.empty')).toHaveCount(22);
+  } finally {
+    releaseCore();
+  }
+  await expect(page.locator('#readyCount')).toHaveText('0');
+  await expect(page.locator('#generateBtn')).toBeDisabled();
+});
+
+test('a valid WAV above 100 MiB converts and downloads as a playable record', async ({ page }) => {
+  await page.goto('/');
+  await configurePack(page, 'Audio grande');
+  const totalBytes = await uploadPaddedWavs(page, '#card-0 .song-input', 101);
+  expect(totalBytes).toBeGreaterThan(100 * 1024 * 1024);
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  await expect(page.locator('#selectedCount')).toHaveText('1');
+  await expect(page.locator('#generateBtn')).toBeEnabled();
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expect(bytes.subarray(0, 4).toString()).toBe('OggS');
+  expect(bytes.length).toBeGreaterThan(100);
+  const playable = await page.locator('#card-0 audio').evaluate(async (audio) => {
+    if (audio.readyState < 1) {
+      await new Promise((resolve, reject) => {
+        audio.addEventListener('loadedmetadata', resolve, { once: true });
+        audio.addEventListener('error', () => reject(new Error('The generated record is not playable.')), { once: true });
+      });
+    }
+    return { duration: audio.duration, error: audio.error?.code || 0 };
+  });
+  expect(playable.error).toBe(0);
+  expect(playable.duration).toBeGreaterThan(0);
 });
 
 test('a worker startup failure times out visibly and a replacement audio can recover', async ({ page }) => {

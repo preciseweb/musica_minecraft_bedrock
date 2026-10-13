@@ -54,6 +54,14 @@ Las texturas se escriben en las rutas vanilla: `textures/items/record_<disco>.pn
 
 La comprobación inspecciona los PNG y las rutas exportadas dentro del paquete; todavía requiere comprobar la apariencia dentro de Minecraft.
 
+## Audios grandes y memoria
+
+La selección de los 22 discos **no tiene límite de peso total**. Se retiraron los límites de 250 MB por selección y de 100 MB por canción. Cada archivo individual debe pesar menos de 2 GB, el [límite técnico documentado de FFmpeg en WebAssembly](https://ffmpegwasm.netlify.app/docs/faq/#what-is-the-maximum-size-of-input-file).
+
+Los archivos originales se montan con WORKERFS y el motor lee fragmentos según los necesita, evitando una copia completa de cada entrada en la memoria de FFmpeg. Las conversiones se hacen una a una y se desmontan las entradas y eliminan las salidas temporales al terminar. La conversión ya no se interrumpe automáticamente a los cinco minutos.
+
+El audio convertido y el paquete de descarga necesitan memoria; la capacidad real sigue dependiendo del dispositivo y del navegador. Las pruebas convierten los 22 archivos con más de 286 MB combinados y descargan el paquete completo, además de verificar un WAV individual mayor de 100 MB.
+
 ## Comprobaciones
 
 ```bash
