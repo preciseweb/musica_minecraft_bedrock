@@ -168,6 +168,17 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: 20px; }
 .disc-icon svg { width: 24px; height: 24px; }
 .ready .disc-icon { color: var(--secondary); border-color: #3c715a; background-color: #17231e; }
 .error .disc-icon { color: var(--st-error); border-color: #875160; }
+.disc-icon.has-cover { border-radius: 7px; background-image: none; width: 44px; height: 44px; overflow: hidden; }
+.song-cover-preview { width: 100%; height: 100%; object-fit: cover; }
+.song-artwork { margin-top: 2px; padding-top: 12px; border-top: 1px solid var(--border-light); }
+.song-cover-status { color: var(--text-sub); font-size: 12px; line-height: 1.6; }
+.song-cover-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cover-action, .cover-remove { min-height: 44px; padding: 8px 10px; font-size: 12px; line-height: 1.4; border: 1px solid #4c3f60; background: #30263e; color: var(--text-main); }
+.cover-action:hover:not(:disabled) { border-color: var(--accent); }
+.cover-remove { color: var(--text-sub); background: transparent; }
+.catalog-note, .artwork-help { color: var(--text-sub); font-size: 12px; line-height: 1.7; }
+.collection-heading .catalog-note { color: var(--secondary); margin-top: 8px; font-size: 12px; }
+.artwork-help { margin-top: 20px; padding: 14px 16px; border: 1px solid var(--border-light); border-radius: 9px; background: var(--bg-card); }
 .disc-info { flex: 1; min-width: 0; }
 .disc-info h3 { font-size: 14px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; text-transform: none; }
 .disc-info p, .disc-status { font-size: 12px; color: var(--text-sub); margin-top: 3px; line-height: 1.5; overflow-wrap: anywhere; }

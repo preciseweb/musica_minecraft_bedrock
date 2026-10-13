@@ -37,6 +37,87 @@ async function jpegCover(page) {
   return { name: 'portada.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(base64, 'base64') };
 }
 
+async function pngCover(page) {
+  const base64 = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 240;
+    canvas.height = 160;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#7247b8';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png').split(',')[1];
+  });
+  return { name: 'album.png', mimeType: 'image/png', buffer: Buffer.from(base64, 'base64') };
+}
+
+async function compressedAudioFixtures(page) {
+  return page.evaluate(async (bytes) => {
+    const { FFmpeg } = await import('/vendor/ffmpeg-0.12.15/index.js');
+    const engine = new FFmpeg();
+    try {
+      await engine.load({
+        coreURL: new URL('/vendor/core-0.12.10/ffmpeg-core.js', location.href).href,
+        wasmURL: new URL('/vendor/core-0.12.10/ffmpeg-core.wasm', location.href).href,
+      });
+      await engine.writeFile('fixture.wav', new Uint8Array(bytes));
+      const flacCode = await engine.exec(['-i', 'fixture.wav', '-c:a', 'flac', '-y', 'fixture.flac']);
+      const mp3Code = await engine.exec(['-i', 'fixture.wav', '-c:a', 'libmp3lame', '-y', 'fixture.mp3']);
+      if (flacCode !== 0 || mp3Code !== 0) throw new Error('Unable to encode compressed audio test fixtures.');
+      return {
+        flac: Array.from(await engine.readFile('fixture.flac')),
+        mp3: Array.from(await engine.readFile('fixture.mp3')),
+      };
+    } finally {
+      engine.terminate();
+    }
+  }, Array.from(wavFile().buffer));
+}
+
+function mp3WithArtwork(bytes, imageBytes) {
+  let audio = Buffer.from(bytes);
+  if (audio.subarray(0, 3).toString() === 'ID3') {
+    const length = audio.subarray(6, 10).reduce((size, byte) => (size << 7) | byte, 0);
+    audio = audio.subarray(10 + length);
+  }
+  // A real ID3v2.3 front-cover APIC frame exercises music-metadata's parser.
+  const body = Buffer.concat([Buffer.from([0]), Buffer.from('image/png\0'), Buffer.from([3, 0]), imageBytes]);
+  const frameHeader = Buffer.alloc(10);
+  frameHeader.write('APIC');
+  frameHeader.writeUInt32BE(body.length, 4);
+  const tag = Buffer.concat([frameHeader, body]);
+  const header = Buffer.from([0x49, 0x44, 0x33, 3, 0, 0, 0, 0, 0, 0]);
+  for (let i = 0; i < 4; i += 1) header[9 - i] = (tag.length >> (i * 7)) & 0x7f;
+  return { name: 'cancion-con-portada.mp3', mimeType: 'audio/mpeg', buffer: Buffer.concat([header, tag, audio]) };
+}
+
+async function configurePack(page, name = 'Discos con portada') {
+  await page.locator('#modName').fill(name);
+  await page.locator('#modDesc').fill('Mi música y mis portadas');
+  await page.locator('#modIcon').setInputFiles(await jpegCover(page));
+  await expect(page.locator('#iconPreview')).toBeVisible();
+}
+
+async function expectDiscPng(page, zip, path, expectedColor, tolerance = 0) {
+  const file = zip.file(path);
+  expect(file, `${path} must exist in the pack`).not.toBeNull();
+  const png = await file.async('nodebuffer');
+  expect(png.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  expect(png.readUInt32BE(16)).toBe(128);
+  expect(png.readUInt32BE(20)).toBe(128);
+  const pixel = await page.evaluate(async (bytes) => {
+    const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type: 'image/png' }));
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return Array.from(context.getImageData(64, 64, 1, 1).data);
+  }, Array.from(png));
+  expectedColor.forEach((channel, index) => expect(Math.abs(pixel[index] - channel)).toBeLessThanOrEqual(tolerance));
+  expect(pixel[3]).toBe(255);
+}
+
 async function downloadZip(page, button = '#generateBtn') {
   const downloadPromise = page.waitForEvent('download');
   await page.locator(button).click();
@@ -63,7 +144,7 @@ test('real local conversion exports a partial pack, normalized cover and credits
   await page.locator('#modIcon').setInputFiles(await jpegCover(page));
   await expect(page.locator('#iconPreview')).toBeVisible();
   const unsafeName = '<img src=x onerror=alert(1)>.wav';
-  await page.locator('#card-0 input[type=file]').setInputFiles(wavFile(unsafeName));
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile(unsafeName));
   await expect(page.locator('#card-0')).toHaveClass(/ready/);
   await expect(page.locator('#card-0 .file-name')).toHaveText(unsafeName);
   await expect(page.locator('#card-0 .file-name img')).toHaveCount(0);
@@ -92,7 +173,7 @@ test('real local conversion exports a partial pack, normalized cover and credits
   const repeatedManifest = JSON.parse(await repeat.zip.file('manifest.json').async('string'));
   expect(repeatedManifest.header.description).toBe(`${description}\n${credit}`);
   await expect(page.locator('#modDesc')).toHaveValue(description);
-  await page.locator('#card-1 input[type=file]').setInputFiles(wavFile('segunda.wav', 660));
+  await page.locator('#card-1 .song-input').setInputFiles(wavFile('segunda.wav', 660));
   await expect(page.locator('#card-1')).toHaveClass(/ready/);
   await expect(page.locator('#readyCount')).toHaveText('2');
   expect(assets).toEqual({ core: 1, wasm: 1, zip: 1 });
@@ -122,7 +203,7 @@ test('clearing queued and active conversions cannot restore a removed song', asy
   await page.locator('#card-0 .btn-close').click();
   releaseCore();
   await expect(page.locator('#selectedCount')).toHaveText('0');
-  await page.locator('#card-2 input[type=file]').setInputFiles(wavFile('nueva.wav'));
+  await page.locator('#card-2 .song-input').setInputFiles(wavFile('nueva.wav'));
   await expect(page.locator('#card-2')).toHaveClass(/ready/);
   await expect(page.locator('#card-0')).toHaveClass(/empty/);
   await expect(page.locator('#card-1')).toHaveClass(/empty/);
@@ -153,7 +234,7 @@ test('a worker startup failure times out visibly and a replacement audio can rec
   await page.route('**/vendor/ffmpeg-0.12.15/worker.js', (route) => route.abort());
   await page.goto('/');
   const workerRequest = page.waitForRequest('**/vendor/ffmpeg-0.12.15/worker.js');
-  await page.locator('#card-0 input[type=file]').setInputFiles(wavFile('fallo.wav'));
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('fallo.wav'));
   await workerRequest;
   await expect(page.locator('#card-0')).toHaveClass(/converting/);
   await page.clock.fastForward(120_001);
@@ -161,36 +242,17 @@ test('a worker startup failure times out visibly and a replacement audio can rec
   await expect(page.locator('#card-0 .disc-status')).toContainText('Cambia el archivo');
   await expect(page.locator('#generateBtn')).toBeDisabled();
   await page.unroute('**/vendor/ffmpeg-0.12.15/worker.js');
-  await page.locator('#card-0 input[type=file]').setInputFiles(wavFile('recuperado.wav'));
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('recuperado.wav'));
   await expect(page.locator('#card-0')).toHaveClass(/ready/);
   await expect(page.locator('#readyCount')).toHaveText('1');
 });
 
 test('real MP3 and FLAC uploads both become playable Ogg audio', async ({ page }) => {
   await page.goto('/');
-  const fixtures = await page.evaluate(async (bytes) => {
-    const { FFmpeg } = await import('/vendor/ffmpeg-0.12.15/index.js');
-    const engine = new FFmpeg();
-    try {
-      await engine.load({
-        coreURL: new URL('/vendor/core-0.12.10/ffmpeg-core.js', location.href).href,
-        wasmURL: new URL('/vendor/core-0.12.10/ffmpeg-core.wasm', location.href).href,
-      });
-      await engine.writeFile('fixture.wav', new Uint8Array(bytes));
-      const flacCode = await engine.exec(['-i', 'fixture.wav', '-c:a', 'flac', '-y', 'fixture.flac']);
-      const mp3Code = await engine.exec(['-i', 'fixture.wav', '-c:a', 'libmp3lame', '-y', 'fixture.mp3']);
-      if (flacCode !== 0 || mp3Code !== 0) throw new Error('Unable to encode compressed audio test fixtures.');
-      return {
-        flac: Array.from(await engine.readFile('fixture.flac')),
-        mp3: Array.from(await engine.readFile('fixture.mp3')),
-      };
-    } finally {
-      engine.terminate();
-    }
-  }, Array.from(wavFile().buffer));
-  await page.locator('#card-0 input[type=file]').setInputFiles({ name: 'cancion.flac', mimeType: 'audio/flac', buffer: Buffer.from(fixtures.flac) });
+  const fixtures = await compressedAudioFixtures(page);
+  await page.locator('#card-0 .song-input').setInputFiles({ name: 'cancion.flac', mimeType: 'audio/flac', buffer: Buffer.from(fixtures.flac) });
   await expect(page.locator('#card-0')).toHaveClass(/ready/);
-  await page.locator('#card-1 input[type=file]').setInputFiles({ name: 'cancion.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from(fixtures.mp3) });
+  await page.locator('#card-1 .song-input').setInputFiles({ name: 'cancion.mp3', mimeType: 'audio/mpeg', buffer: Buffer.from(fixtures.mp3) });
   await expect(page.locator('#card-1')).toHaveClass(/ready/);
   await page.locator('#modName').fill('Formatos comprimidos');
   await page.locator('#modDesc').fill('FLAC y MP3');
@@ -203,6 +265,127 @@ test('real MP3 and FLAC uploads both become playable Ogg audio', async ({ page }
     expect(bytes.length).toBeGreaterThan(100);
   }
   await expect(page.locator('#readyCount')).toHaveText('2');
+});
+
+test('embedded MP3 artwork loads lazily and becomes the original disc item texture', async ({ page }) => {
+  const metadataRequests = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/vendor/metadata-12.2.0/')) metadataRequests.push(request.url());
+  });
+  await page.goto('/');
+  await expect(page.locator('#discCatalogStatus')).toContainText('22');
+  await expect(page.locator('.disc-card')).toHaveCount(22);
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeHidden();
+  expect(metadataRequests).toEqual([]);
+  const fixtures = await compressedAudioFixtures(page);
+  const artwork = await pngCover(page);
+  await configurePack(page);
+  await page.locator('#card-0 .song-input').setInputFiles(mp3WithArtwork(fixtures.mp3, artwork.buffer));
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeVisible();
+  expect(metadataRequests.length).toBeGreaterThan(0);
+  const { zip } = await downloadZip(page);
+  await expectDiscPng(page, zip, 'textures/items/record_11.png', [0x72, 0x47, 0xb8]);
+  expect(zip.file('textures/item_texture.json')).toBeNull();
+  expect(Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith('textures/')).map((file) => file.name)).toEqual(['textures/items/record_11.png']);
+  expect((await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer')).subarray(0, 4).toString()).toBe('OggS');
+});
+
+test('manual artwork survives audio conversion, overrides modern textures and can restore the original sprite', async ({ page }) => {
+  let releaseCore;
+  let startedCore;
+  const coreGate = new Promise((resolve) => { releaseCore = resolve; });
+  const coreStarted = new Promise((resolve) => { startedCore = resolve; });
+  await page.route('**/ffmpeg-core.js', async (route) => {
+    startedCore();
+    await coreGate;
+    await route.continue();
+  });
+  await page.goto('/');
+  await configurePack(page);
+  await expect(page.locator('#card-19 .cover-action')).toBeDisabled();
+  await page.locator('#card-19 .song-input').setInputFiles(wavFile('tears-personalizado.wav'));
+  await coreStarted;
+  await expect(page.locator('#card-19')).toHaveClass(/converting/);
+  await expect(page.locator('#card-19 .cover-action')).toBeEnabled();
+  await page.locator('#card-19 .song-cover-input').setInputFiles(await jpegCover(page));
+  await expect(page.locator('#card-19 .song-cover-preview')).toBeVisible();
+  releaseCore();
+  await expect(page.locator('#card-19')).toHaveClass(/ready/);
+  await expect(page.locator('#card-19 .song-cover-preview')).toBeVisible();
+  const withCover = await downloadZip(page);
+  await expectDiscPng(page, withCover.zip, 'textures/items/music_disc_tears.png', [0xdb, 0x99, 0x5a], 3);
+  await page.locator('#card-19 .cover-remove').click();
+  await expect(page.locator('#card-19 .song-cover-preview')).toBeHidden();
+  const originalSprite = await downloadZip(page);
+  expect(Object.values(originalSprite.zip.files).filter((file) => !file.dir && file.name.startsWith('textures/'))).toEqual([]);
+  expect(originalSprite.zip.file('sounds/music/game/records/tears.ogg')).not.toBeNull();
+  await page.locator('#card-19 .song-cover-input').setInputFiles(await pngCover(page));
+  await expect(page.locator('#card-19 .song-cover-preview')).toBeVisible();
+  const replacedCover = await downloadZip(page);
+  await expectDiscPng(page, replacedCover.zip, 'textures/items/music_disc_tears.png', [0x72, 0x47, 0xb8]);
+});
+
+test('clearing and replacing a song cannot restore its pending embedded artwork', async ({ page }) => {
+  let releaseMetadata;
+  let startedMetadata;
+  const metadataGate = new Promise((resolve) => { releaseMetadata = resolve; });
+  const metadataStarted = new Promise((resolve) => { startedMetadata = resolve; });
+  await page.route('**/vendor/metadata-12.2.0/index.js', async (route) => {
+    startedMetadata();
+    await metadataGate;
+    await route.continue();
+  });
+  await page.goto('/');
+  const fixtures = await compressedAudioFixtures(page);
+  const artwork = await pngCover(page);
+  await configurePack(page);
+  await page.locator('#card-0 .song-input').setInputFiles(mp3WithArtwork(fixtures.mp3, artwork.buffer));
+  await metadataStarted;
+  await page.locator('#card-0 .btn-close').click();
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeHidden();
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('sin-portada.wav'));
+  releaseMetadata();
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  await expect(page.locator('#card-0 .song-cover-status')).toContainText('Sin portada incrustada');
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeHidden();
+  await expect(page.locator('#card-0 .file-name')).toHaveText('sin-portada.wav');
+  const { zip } = await downloadZip(page);
+  expect(Object.values(zip.files).filter((file) => !file.dir && file.name.startsWith('textures/'))).toEqual([]);
+});
+
+test('manual artwork unblocks conversion immediately while embedded metadata is still loading', async ({ page }) => {
+  let releaseMetadata;
+  let startedMetadata;
+  const metadataGate = new Promise((resolve) => { releaseMetadata = resolve; });
+  const metadataStarted = new Promise((resolve) => { startedMetadata = resolve; });
+  await page.route('**/vendor/metadata-12.2.0/index.js', async (route) => {
+    startedMetadata();
+    await metadataGate;
+    await route.continue();
+  });
+  await page.goto('/');
+  await configurePack(page);
+  const audio = wavFile('portada-manual.wav');
+  await page.locator('#card-0 .song-input').setInputFiles(audio);
+  await metadataStarted;
+  await page.locator('#card-0 .song-cover-input').setInputFiles(await jpegCover(page));
+  await expect(page.locator('#card-0')).toHaveClass(/ready/, { timeout: 5000 });
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeVisible();
+  await expect(page.locator('#card-0 .song-cover-status')).toContainText('Portada personalizada');
+  await expect(page.locator('#generateBtn')).toBeEnabled({ timeout: 5000 });
+  const whileLoading = await downloadZip(page);
+  await expectDiscPng(page, whileLoading.zip, 'textures/items/record_11.png', [0xdb, 0x99, 0x5a], 3);
+  releaseMetadata();
+  // Complete an actual WAV parse after the module gate to settle the stale auto task.
+  await page.evaluate(async (bytes) => {
+    const { parseBlob } = await import('/vendor/metadata-12.2.0/index.js');
+    await parseBlob(new File([new Uint8Array(bytes)], 'without-cover.wav', { type: 'audio/wav' }), { duration: false });
+  }, Array.from(audio.buffer));
+  await expect(page.locator('#card-0 .song-cover-status')).toContainText('Portada personalizada');
+  await expect(page.locator('#card-0 .song-cover-preview')).toBeVisible();
+  const afterLoading = await downloadZip(page);
+  await expectDiscPng(page, afterLoading.zip, 'textures/items/record_11.png', [0xdb, 0x99, 0x5a], 3);
 });
 
 test('mobile layout fits the screen and social placeholders stay unavailable until configured', async ({ page }) => {
@@ -223,7 +406,7 @@ test('mobile layout fits the screen and social placeholders stay unavailable unt
   await page.locator('#modName').fill('Mi pack móvil');
   await page.locator('#modDesc').fill('Canciones para llevar');
   await page.locator('#modIcon').setInputFiles(await jpegCover(page));
-  await page.locator('#card-0 input[type=file]').setInputFiles(wavFile('movil.wav'));
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('movil.wav'));
   await expect(page.locator('#card-0')).toHaveClass(/ready/);
   await expect(page.locator('#mobileDownloadBar')).toBeVisible();
   await expect(page.locator('#mobileGenerateBtn')).toBeEnabled();

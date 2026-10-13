@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ATTRIBUTION, DISCS, MAX_AUDIO_BYTES, MAX_ICON_BYTES, buildDescription,
-  buildPackMetadata, downloadFilename, validateAudio, validateIcon,
+  buildPackMetadata, discTexturePath, downloadFilename, validateAudio, validateIcon,
 } from '../pack.js';
 
 test('both manifest descriptions preserve the user text and append the exact credits', () => {
@@ -65,4 +65,22 @@ test('minimum Minecraft version follows the most recent selected record', () => 
   assert.deepEqual(minimum(['cat', 'relic']), [1, 20, 0]);
   assert.deepEqual(minimum(['tears', 'lava_chicken']), [1, 21, 93]);
   assert.deepEqual(minimum(['bounce', 'cat', 'lava_chicken']), [1, 26, 30]);
+});
+
+test('all 22 record textures override their actual Bedrock item paths', () => {
+  const expectedPaths = {
+    '11': 'record_11', '13': 'record_13', blocks: 'record_blocks', cat: 'record_cat',
+    chirp: 'record_chirp', far: 'record_far', mall: 'record_mall', mellohi: 'record_mellohi',
+    stal: 'record_stal', strad: 'record_strad', wait: 'record_wait', ward: 'record_ward',
+    pigstep: 'record_pigstep', otherside: 'record_otherside', '5': 'record_5',
+    relic: 'music_disc_relic', precipice: 'music_disc_precipice', creator: 'music_disc_creator',
+    creator_music_box: 'music_disc_creator_music_box', tears: 'music_disc_tears',
+    bounce: 'music_disc_bounce', lava_chicken: 'music_disc_lava_chicken',
+  };
+  assert.equal(DISCS.length, 22);
+  assert.deepEqual([...DISCS].sort(), Object.keys(expectedPaths).sort());
+  for (const [disc, filename] of Object.entries(expectedPaths)) {
+    assert.equal(discTexturePath(disc), `textures/items/${filename}.png`);
+  }
+  assert.throws(() => discTexturePath('unknown'), /Disco desconocido/);
 });

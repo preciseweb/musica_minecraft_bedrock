@@ -4,6 +4,14 @@ export const DISCS = Object.freeze([
   '11', '13', 'blocks', 'cat', 'chirp', 'far', 'mall', 'mellohi', 'stal', 'strad', 'wait', 'ward',
   'pigstep', 'otherside', '5', 'relic', 'precipice', 'creator', 'creator_music_box', 'tears', 'bounce', 'lava_chicken'
 ]);
+// Stable Bedrock 26.52; the 26.50.4 sample catalog is unchanged by the hotfixes.
+export const DISC_CATALOG = Object.freeze({ version: '26.52', checkedAt: '2026-10-12' });
+const MODERN_TEXTURE_DISCS = new Set(['relic', 'precipice', 'creator', 'creator_music_box', 'tears', 'bounce', 'lava_chicken']);
+
+export function discTexturePath(disc) {
+  if (!DISCS.includes(disc)) throw new Error('Disco desconocido.');
+  return `textures/items/${MODERN_TEXTURE_DISCS.has(disc) ? 'music_disc' : 'record'}_${disc}.png`;
+}
 export const AUDIO_ACCEPT = 'audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.webm,.aiff,.wma';
 export const MAX_AUDIO_BYTES = 100 * 1024 * 1024;
 export const MAX_TOTAL_BYTES = 250 * 1024 * 1024;
