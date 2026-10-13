@@ -1,6 +1,7 @@
 const MAX_COVER_BYTES = 10 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
 let metadataLoading;
+const songMetadata = new WeakMap();
 
 function loadMetadata() {
   if (!metadataLoading) {
@@ -10,6 +11,19 @@ function loadMetadata() {
     });
   }
   return metadataLoading;
+}
+
+function readSongMetadata(file) {
+  if (!songMetadata.has(file)) {
+    songMetadata.set(file, loadMetadata().then(({ parseBlob }) => parseBlob(file, {
+      duration: false, skipPostHeaders: true, skipCovers: false
+    })));
+  }
+  return songMetadata.get(file);
+}
+
+export async function inspectSongAudio(file) {
+  return (await readSongMetadata(file)).format;
 }
 
 // Canonical MIME types come from raster signatures, rather than untrusted tags.
@@ -25,8 +39,8 @@ function rasterType(bytes) {
 
 /** Find embedded album artwork without loading the parser during initial page load. */
 export async function extractSongCover(file) {
-  const { parseBlob, selectCover } = await loadMetadata();
-  const metadata = await parseBlob(file, { duration: false, skipPostHeaders: true, skipCovers: false });
+  const { selectCover } = await loadMetadata();
+  const metadata = await readSongMetadata(file);
   const pictures = metadata.common?.picture || [];
   const preferred = selectCover(pictures);
   // If the preferred image is unsupported, try another embedded raster cover.

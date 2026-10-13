@@ -7,7 +7,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const output = path.join(root, 'dist');
 await rm(output, { recursive: true, force: true });
 await mkdir(path.join(output, 'vendor'), { recursive: true });
-for (const file of ['index.html', 'style.css', 'app.js', 'pack.js', 'converter.js', 'social-links.js', 'artwork.js']) {
+for (const file of ['index.html', 'style.css', 'app.js', 'pack.js', 'converter.js', 'social-links.js', 'artwork.js', 'vorbis-worker.js']) {
   await cp(path.join(root, file), path.join(output, file));
 }
 await cp(path.join(root, 'node_modules/@ffmpeg/ffmpeg/dist/esm'), path.join(output, 'vendor/ffmpeg-0.12.15'), { recursive: true });
@@ -20,6 +20,15 @@ await build({
   chunkNames: 'chunks/[name]-[hash]',
   bundle: true,
   splitting: true,
+  platform: 'browser',
+  format: 'esm',
+  target: ['es2022'],
+  minify: true
+});
+await build({
+  stdin: { contents: "export { createOggEncoder } from 'wasm-media-encoders';", resolveDir: root, sourcefile: 'vorbis-entry.js' },
+  outfile: path.join(output, 'vendor/vorbis-0.7.0/index.js'),
+  bundle: true,
   platform: 'browser',
   format: 'esm',
   target: ['es2022'],

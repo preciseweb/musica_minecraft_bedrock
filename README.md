@@ -15,7 +15,7 @@ Abre `http://localhost:4173`. Después de editar los archivos, ejecuta `npm run 
 
 ## Publicación en Vercel
 
-`vercel.json` configura la compilación con `npm run build` y la carpeta de salida `dist/`. El despliegue necesita ejecutar `npm install` o `npm ci`: ya no basta con servir la raíz del repositorio. FFmpeg y JSZip se sirven desde el mismo sitio y se cargan cuando se necesitan; el motor de audio (~31 MB) se descarga en la primera conversión y se reutiliza durante la sesión. Las dependencias con versión en su ruta tienen caché persistente.
+`vercel.json` configura la compilación con `npm run build` y la carpeta de salida `dist/`. El despliegue necesita ejecutar `npm install` o `npm ci`: ya no basta con servir la raíz del repositorio. Los motores y JSZip se sirven desde el mismo sitio y se cargan cuando se necesitan. La ruta habitual usa un codificador Vorbis de aproximadamente 606 kB; el núcleo FFmpeg de unos 31 MB solo se carga como respaldo. Los motores se reutilizan y las dependencias con versión en su ruta tienen caché persistente.
 
 ## Descripción automática
 
@@ -58,9 +58,19 @@ La comprobación inspecciona los PNG y las rutas exportadas dentro del paquete; 
 
 La selección de los 22 discos **no tiene límite de peso total**. Se retiraron los límites de 250 MB por selección y de 100 MB por canción. Cada archivo individual debe pesar menos de 2 GB, el [límite técnico documentado de FFmpeg en WebAssembly](https://ffmpegwasm.netlify.app/docs/faq/#what-is-the-maximum-size-of-input-file).
 
-Los archivos originales se montan con WORKERFS y el motor lee fragmentos según los necesita, evitando una copia completa de cada entrada en la memoria de FFmpeg. Las conversiones se hacen una a una y se desmontan las entradas y eliminan las salidas temporales al terminar. La conversión ya no se interrumpe automáticamente a los cinco minutos.
+Los archivos grandes o no decodificados por el navegador se montan con WORKERFS y el motor de respaldo lee fragmentos según los necesita, evitando una copia completa de cada entrada en la memoria de FFmpeg. Se desmontan las entradas y eliminan las salidas temporales al terminar. La conversión no se interrumpe automáticamente a los cinco minutos.
 
 El audio convertido y el paquete de descarga necesitan memoria; la capacidad real sigue dependiendo del dispositivo y del navegador. Las pruebas convierten los 22 archivos con más de 286 MB combinados y descargan el paquete completo, además de verificar un WAV individual mayor de 100 MB.
+
+## Conversión acelerada y calidad
+
+- Los OGG/Vorbis compatibles se conservan byte por byte, sin otra generación de compresión. Se comprueba el codec real; un OGG que contiene Opus se convierte a Vorbis.
+- En archivos habituales, el navegador decodifica el audio y un Worker dedicado lo codifica de forma incremental con `wasm-media-encoders`. El motor se conserva para las siguientes canciones.
+- Se usa Vorbis VBR de calidad **5**, superior al perfil 3 anterior. La salida convertida mantiene 44,1 kHz y uno o dos canales; FFmpeg de respaldo también usa calidad 5. La conversión a Vorbis sigue siendo con pérdida: la preservación exacta solo aplica a los OGG compatibles que se reutilizan.
+- Los equipos que informan al menos cuatro núcleos y 4 GB de memoria procesan hasta dos canciones a la vez. El resto procesa una para contener el consumo de memoria. Cada conversión puede cancelarse de forma independiente.
+- La ruta nativa está limitada a entradas de 64 MB y PCM estimado de 128 MB por trabajo; al superar esos umbrales se usa FFmpeg sin rechazar la canción. Los metadatos y las portadas se leen una sola vez por archivo y una portada lenta no ocupa un puesto de conversión.
+
+Medición local en Chromium con cinco MP3 sintéticos de **60 segundos**, estéreo a 44,1 kHz y 320 kbps: la interfaz completa pasó de **5,50 s** a **2,88 s** (2,79 s con el motor cargado). La señal exportada conserva duración, canales y frecuencia, y su SNR medido subió de 32,39 a 36,32 dB con el perfil de mayor calidad. Esto mide el error de señal y no sustituye una escucha. El servidor local y el hardware de prueba no reproducen necesariamente el tiempo de otro dispositivo o de canciones más largas.
 
 ## Comprobaciones
 
@@ -70,7 +80,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-Las pruebas de navegador convierten WAV, MP3 y FLAC con el motor real, descargan e inspeccionan el paquete, comprueban la portada del pack y las texturas extraídas o elegidas, y verifican cancelaciones, validaciones y el diseño móvil. Las pruebas no equivalen a una instalación dentro de Minecraft.
+Las pruebas de navegador convierten WAV, MP3, FLAC y Opus con motores reales, comprueban la conservación exacta de OGG/Vorbis, calidad, duración, recuperación y cancelación paralela. También descargan e inspeccionan el paquete, comprueban la portada del pack y las texturas extraídas o elegidas, y verifican validaciones y diseño móvil. Las pruebas no equivalen a una instalación dentro de Minecraft.
 
 ## Compatibilidad
 

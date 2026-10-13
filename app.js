@@ -10,16 +10,15 @@ const slots = DISCS.map((discName) => ({
 }));
 const cards = [];
 const coverCancellations = new Map();
-const converter = new AudioConverter();
+const parallelConversions = navigator.hardwareConcurrency >= 4 && navigator.deviceMemory >= 4 ? 2 : 1;
+const conversionWorkers = Array.from({ length: parallelConversions }, () => ({ converter: new AudioConverter(), job: null, message: '' }));
 let queue = [];
 let processing = false;
-let activeJob = null;
 let packaging = false;
 let iconBlob = null;
 let iconUrl = '';
 let iconRevision = 0;
 let zipLoading = null;
-let stageMessage = '';
 let completedDownload = '';
 
 function showNotice(message, error = false) {
@@ -38,6 +37,7 @@ function updateSummary() {
   const errors = selected.filter((slot) => slot.status === 'error');
   const converting = selected.some((slot) => ['queued', 'converting'].includes(slot.status));
   const pending = converting || selected.some((slot) => slot.coverPending);
+  const active = conversionWorkers.filter((worker) => worker.job);
   $('readyCount').textContent = ready.length;
   $('selectedCount').textContent = selected.length;
   $('clearAllBtn').disabled = !selected.length || packaging;
@@ -45,7 +45,7 @@ function updateSummary() {
   $('bulkSongs').disabled = packaging;
   if (!packaging) {
     $('globalProgress').value = selected.length ? selected.reduce((sum, slot) => sum + slot.progress, 0) / selected.length : 0;
-    $('globalStatus').textContent = pending ? converting ? stageMessage || 'Canciones en espera…' : 'Preparando la portada del disco…'
+    $('globalStatus').textContent = pending ? converting ? active.length > 1 ? `Procesando ${active.length} canciones a la vez…` : active[0]?.message || 'Canciones en espera…' : 'Preparando la portada del disco…'
       : errors.length ? `${errors.length} ${errors.length === 1 ? 'audio necesita' : 'audios necesitan'} atención.`
       : ready.length ? completedDownload || `${ready.length} ${ready.length === 1 ? 'canción lista' : 'canciones listas'} para tu mundo.`
       : 'Elige tus primeras canciones.';
@@ -178,7 +178,7 @@ function clearSlot(index, announce = true) {
   slot.coverRevision += 1;
   coverCancellations.get(index)?.();
   queue = queue.filter((job) => job.index !== index);
-  if (activeJob?.index === index) converter.cancel();
+  for (const worker of conversionWorkers) if (worker.job?.index === index) worker.converter.cancel();
   if (slot.url) URL.revokeObjectURL(slot.url);
   if (slot.coverUrl) URL.revokeObjectURL(slot.coverUrl);
   Object.assign(slot, {
@@ -186,7 +186,6 @@ function clearSlot(index, announce = true) {
     coverBlob: null, coverUrl: '', coverPending: false, coverStatus: 'empty', coverSource: ''
   });
   completedDownload = '';
-  stageMessage = '';
   updateCard(index);
   if (announce) showNotice(`Audio eliminado del disco ${slot.discName}.`);
 }
@@ -227,52 +226,58 @@ function addFiles(files) {
   showNotice(messages.join(' '), Boolean(rejected || excess));
 }
 
-async function processQueue() {
-  if (processing) return;
-  processing = true;
-  try {
+function processQueue() {
+  for (const worker of conversionWorkers) {
+    if (worker.job) continue;
     while (queue.length) {
       const job = queue.shift();
-      const slot = slots[job.index];
-      const isCurrent = () => slot.revision === job.revision && slot.file === job.file;
-      if (!isCurrent()) continue;
-      activeJob = job;
-      slot.status = 'converting';
-      slot.progress = 1;
-      updateCard(job.index);
-      const artworkTask = prepareEmbeddedCover(job);
-      try {
-        const blob = await converter.convert(job.file, (progress) => {
-          if (!isCurrent()) return;
-          slot.progress = Math.max(slot.progress, progress);
-          updateCard(job.index);
-        }, (message) => {
-          if (!isCurrent()) return;
-          stageMessage = `${slot.discName}: ${message}`;
-          updateSummary();
-        }, isCurrent);
-        await artworkTask;
-        if (!isCurrent()) continue;
-        slot.blob = blob;
-        slot.url = URL.createObjectURL(blob);
-        slot.status = 'ready';
-        slot.progress = 100;
-      } catch (error) {
-        if (!isCurrent()) continue;
-        console.error('Error de conversión:', error);
-        converter.cancel();
-        slot.status = 'error';
-        slot.progress = 0;
-        slot.error = 'No se pudo leer este audio. Cambia el archivo o vuelve a intentarlo.';
-        showNotice(`${slot.file.name}: ${slot.error}`, true);
-      } finally {
-        activeJob = null;
-        if (isCurrent()) updateCard(job.index);
-      }
+      if (slots[job.index].revision !== job.revision || slots[job.index].file !== job.file) continue;
+      worker.job = job;
+      processing = true;
+      void processJob(worker, job);
+      break;
     }
+  }
+}
+
+async function processJob(worker, job) {
+  const slot = slots[job.index];
+  const isCurrent = () => slot.revision === job.revision && slot.file === job.file;
+  slot.status = 'converting';
+  slot.progress = 1;
+  worker.message = `${slot.discName}: preparando audio…`;
+  updateCard(job.index);
+  // Covers have independent cancellation; slow tag parsing does not occupy an audio worker.
+  void prepareEmbeddedCover(job);
+  try {
+    const blob = await worker.converter.convert(job.file, (progress) => {
+      if (!isCurrent() || progress <= slot.progress) return;
+      slot.progress = progress;
+      updateCard(job.index);
+    }, (message) => {
+      if (!isCurrent()) return;
+      worker.message = `${slot.discName}: ${message}`;
+      updateSummary();
+    }, isCurrent);
+    if (!isCurrent()) return;
+    slot.blob = blob;
+    slot.url = URL.createObjectURL(blob);
+    slot.status = 'ready';
+    slot.progress = 100;
+  } catch (error) {
+    if (!isCurrent()) return;
+    console.error('Error de conversión:', error);
+    worker.converter.cancel();
+    slot.status = 'error';
+    slot.progress = 0;
+    slot.error = 'No se pudo leer este audio. Cambia el archivo o vuelve a intentarlo.';
+    showNotice(`${slot.file.name}: ${slot.error}`, true);
   } finally {
-    processing = false;
-    stageMessage = '';
+    worker.job = null;
+    worker.message = '';
+    processing = conversionWorkers.some((item) => item.job);
+    if (isCurrent()) updateCard(job.index);
+    processQueue();
     updateSummary();
   }
 }
@@ -518,7 +523,7 @@ window.addEventListener('beforeunload', (event) => {
   }
 });
 window.addEventListener('pagehide', () => {
-  converter.cancel();
+  for (const worker of conversionWorkers) worker.converter.cancel();
 });
 
 initGrid();

@@ -4,23 +4,42 @@ import JSZip from 'jszip';
 
 const credit = 'Echo por Preciseweb\nlink para crear tu mod de musica: https://musica-minecraft-bedrock.vercel.app/';
 
-function wavFile(name = 'cancion.wav', frequency = 440) {
-  const sampleRate = 8000;
-  const samples = sampleRate / 4;
-  const buffer = Buffer.alloc(44 + samples * 2);
+// Stable low-resource defaults also exercise the one-at-a-time queue. The
+// separate cancellation test opts into the two-worker queue explicitly.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'hardwareConcurrency', { configurable: true, get: () => 2 });
+    Object.defineProperty(navigator, 'deviceMemory', { configurable: true, get: () => 2 });
+  });
+});
+
+async function forceFFmpeg(page) {
+  await page.addInitScript(() => {
+    window.OfflineAudioContext = undefined;
+    window.webkitOfflineAudioContext = undefined;
+  });
+}
+
+function wavFile(name = 'cancion.wav', frequency = 440, { sampleRate = 8000, seconds = 0.25, channels = 1 } = {}) {
+  const samples = Math.round(sampleRate * seconds);
+  const buffer = Buffer.alloc(44 + samples * 2 * channels);
   buffer.write('RIFF', 0);
   buffer.writeUInt32LE(buffer.length - 8, 4);
   buffer.write('WAVEfmt ', 8);
   buffer.writeUInt32LE(16, 16);
   buffer.writeUInt16LE(1, 20);
-  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt16LE(channels, 22);
   buffer.writeUInt32LE(sampleRate, 24);
-  buffer.writeUInt32LE(sampleRate * 2, 28);
-  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt32LE(sampleRate * 2 * channels, 28);
+  buffer.writeUInt16LE(2 * channels, 32);
   buffer.writeUInt16LE(16, 34);
   buffer.write('data', 36);
-  buffer.writeUInt32LE(samples * 2, 40);
-  for (let i = 0; i < samples; i += 1) buffer.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * frequency / sampleRate) * 4000), 44 + i * 2);
+  buffer.writeUInt32LE(samples * 2 * channels, 40);
+  for (let i = 0; i < samples; i += 1) {
+    for (let channel = 0; channel < channels; channel += 1) {
+      buffer.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * (frequency + channel * 220) / sampleRate) * 4000), 44 + (i * channels + channel) * 2);
+    }
+  }
   return { name, mimeType: 'audio/wav', buffer };
 }
 
@@ -97,6 +116,60 @@ async function compressedAudioFixtures(page) {
   }, Array.from(wavFile().buffer));
 }
 
+async function vorbisAudioFixture(page) {
+  const fixture = await page.evaluate(async (bytes) => {
+    const { FFmpeg } = await import('/vendor/ffmpeg-0.12.15/index.js');
+    const engine = new FFmpeg();
+    try {
+      await engine.load({
+        coreURL: new URL('/vendor/core-0.12.10/ffmpeg-core.js', location.href).href,
+        wasmURL: new URL('/vendor/core-0.12.10/ffmpeg-core.wasm', location.href).href,
+      });
+      await engine.writeFile('fixture.wav', new Uint8Array(bytes));
+      const vorbisCode = await engine.exec(['-i', 'fixture.wav', '-c:a', 'libvorbis', '-q:a', '7', '-y', 'vorbis.ogg']);
+      if (vorbisCode !== 0) throw new Error('Unable to encode a real Vorbis fixture.');
+      return Array.from(await engine.readFile('vorbis.ogg'));
+    } finally {
+      engine.terminate();
+    }
+  }, Array.from(wavFile('stereo.wav', 440, { sampleRate: 48000, seconds: 2.5, channels: 2 }).buffer));
+  return Buffer.from(fixture);
+}
+
+function expectVorbis(bytes, channels, sampleRate) {
+  expect(bytes.subarray(0, 4).toString()).toBe('OggS');
+  const identification = 27 + bytes[26];
+  expect(bytes[identification]).toBe(1);
+  expect(bytes.subarray(identification + 1, identification + 7).toString()).toBe('vorbis');
+  expect(bytes[identification + 11]).toBe(channels);
+  expect(bytes.readUInt32LE(identification + 12)).toBe(sampleRate);
+}
+
+async function decodeOgg(page, bytes, sampleRate = 44100) {
+  return page.evaluate(async ({ bytes, sampleRate }) => {
+    const context = new AudioContext({ sampleRate });
+    try {
+      const audio = await context.decodeAudioData(new Uint8Array(bytes).buffer);
+      const frequencies = [];
+      const levels = [];
+      for (let channel = 0; channel < audio.numberOfChannels; channel += 1) {
+        const data = audio.getChannelData(channel);
+        let crossings = 0;
+        let energy = 0;
+        for (let index = 1; index < data.length; index += 1) {
+          if (data[index - 1] < 0 && data[index] >= 0) crossings += 1;
+          energy += data[index] ** 2;
+        }
+        frequencies.push(crossings / audio.duration);
+        levels.push(Math.sqrt(energy / data.length));
+      }
+      return { duration: audio.duration, length: audio.length, channels: audio.numberOfChannels, sampleRate: audio.sampleRate, frequencies, levels };
+    } finally {
+      await context.close();
+    }
+  }, { bytes: Array.from(bytes), sampleRate });
+}
+
 function mp3WithArtwork(bytes, imageBytes) {
   let audio = Buffer.from(bytes);
   if (audio.subarray(0, 3).toString() === 'ID3') {
@@ -151,17 +224,18 @@ async function downloadZip(page, button = '#generateBtn') {
 }
 
 test('real local conversion exports a partial pack, normalized cover and credits without mutating the description', async ({ page }) => {
-  const assets = { core: 0, wasm: 0, zip: 0 };
+  const assets = { core: 0, wasm: 0, encoder: 0, zip: 0 };
   const external = [];
   page.on('request', (request) => {
     const url = request.url();
     if (url.endsWith('/ffmpeg-core.js')) assets.core += 1;
     if (url.endsWith('/ffmpeg-core.wasm')) assets.wasm += 1;
+    if (url.endsWith('/vendor/vorbis-0.7.0/index.js')) assets.encoder += 1;
     if (url.endsWith('/jszip-3.10.1.min.js')) assets.zip += 1;
     if (url.startsWith('http') && !url.startsWith('http://127.0.0.1:4173/')) external.push(url);
   });
   await page.goto('/');
-  expect(assets).toEqual({ core: 0, wasm: 0, zip: 0 });
+  expect(assets).toEqual({ core: 0, wasm: 0, encoder: 0, zip: 0 });
   const description = 'Mis canciones\nUna aventura con amigos';
   await page.locator('#modName').fill('Mi pack / aventura');
   await page.locator('#modDesc').fill(description);
@@ -200,11 +274,12 @@ test('real local conversion exports a partial pack, normalized cover and credits
   await page.locator('#card-1 .song-input').setInputFiles(wavFile('segunda.wav', 660));
   await expect(page.locator('#card-1')).toHaveClass(/ready/);
   await expect(page.locator('#readyCount')).toHaveText('2');
-  expect(assets).toEqual({ core: 1, wasm: 1, zip: 1 });
+  expect(assets).toEqual({ core: 0, wasm: 0, encoder: 1, zip: 1 });
   expect(external).toEqual([]);
 });
 
 test('clearing queued and active conversions cannot restore a removed song', async ({ page }) => {
+  await forceFFmpeg(page);
   let releaseCore;
   let startedCore;
   const coreGate = new Promise((resolve) => { releaseCore = resolve; });
@@ -238,6 +313,7 @@ test('clearing queued and active conversions cannot restore a removed song', asy
 });
 
 test('invalid and excess uploads explain what happened without silently replacing songs', async ({ page }) => {
+  await forceFFmpeg(page);
   await page.goto('/');
   await page.locator('#bulkSongs').setInputFiles({ name: 'documento.txt', mimeType: 'text/plain', buffer: Buffer.from('No es una canción') });
   await expect(page.locator('#notice')).toContainText('archivo rechazado');
@@ -254,6 +330,7 @@ test('invalid and excess uploads explain what happened without silently replacin
 });
 
 test('all 22 discs convert a selection above 250 MiB and download a complete pack', async ({ page }) => {
+  await forceFFmpeg(page);
   let releaseCore;
   let startedCore;
   const coreGate = new Promise((resolve) => { releaseCore = resolve; });
@@ -300,6 +377,10 @@ test('all 22 discs convert a selection above 250 MiB and download a complete pac
 });
 
 test('a valid WAV above 100 MiB converts and downloads as a playable record', async ({ page }) => {
+  const cores = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/ffmpeg-core.wasm')) cores.push(request.url());
+  });
   await page.goto('/');
   await configurePack(page, 'Audio grande');
   const totalBytes = await uploadPaddedWavs(page, '#card-0 .song-input', 101);
@@ -322,9 +403,11 @@ test('a valid WAV above 100 MiB converts and downloads as a playable record', as
   });
   expect(playable.error).toBe(0);
   expect(playable.duration).toBeGreaterThan(0);
+  expect(cores).toHaveLength(1);
 });
 
 test('a worker startup failure times out visibly and a replacement audio can recover', async ({ page }) => {
+  await forceFFmpeg(page);
   await page.clock.install();
   await page.route('**/vendor/ffmpeg-0.12.15/worker.js', (route) => route.abort());
   await page.goto('/');
@@ -362,6 +445,158 @@ test('real MP3 and FLAC uploads both become playable Ogg audio', async ({ page }
   await expect(page.locator('#readyCount')).toHaveText('2');
 });
 
+test('the fast encoder preserves stereo content and duration without loading FFmpeg', async ({ page }) => {
+  const assets = { encoder: 0, core: 0, wasm: 0 };
+  page.on('request', (request) => {
+    const address = request.url();
+    if (address.endsWith('/vendor/vorbis-0.7.0/index.js')) assets.encoder += 1;
+    if (address.endsWith('/ffmpeg-core.js')) assets.core += 1;
+    if (address.endsWith('/ffmpeg-core.wasm')) assets.wasm += 1;
+  });
+  await page.goto('/');
+  await configurePack(page, 'Audio estéreo');
+  const input = wavFile('estereo-48000.wav', 440, { sampleRate: 48000, seconds: 2.5, channels: 2 });
+  await page.locator('#card-0 .song-input').setInputFiles(input);
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expectVorbis(bytes, 2, 44100);
+  // Vorbis records its nominal bitrate in the identification packet. The
+  // stereo output must retain the q5 quality floor (160 kbps at 44.1 kHz).
+  expect(bytes.readInt32LE(27 + bytes[26] + 20)).toBeGreaterThanOrEqual(160000);
+  const decoded = await decodeOgg(page, bytes);
+  expect(decoded.channels).toBe(2);
+  expect(decoded.sampleRate).toBe(44100);
+  expect(decoded.duration).toBeCloseTo(2.5, 2);
+  expect(Math.abs(decoded.length - 110250)).toBeLessThan(441);
+  for (const [channel, frequency] of [440, 660].entries()) {
+    expect(Math.abs(decoded.frequencies[channel] - frequency)).toBeLessThan(1);
+    expect(decoded.levels[channel]).toBeCloseTo(4000 / 32768 / Math.sqrt(2), 2);
+  }
+  expect(assets).toEqual({ encoder: 1, core: 0, wasm: 0 });
+});
+
+test('an existing high quality Vorbis song is exported byte for byte without starting an encoder', async ({ page }) => {
+  await page.goto('/');
+  const original = await vorbisAudioFixture(page);
+  const assets = [];
+  page.on('request', (request) => {
+    const address = request.url();
+    if (/vorbis-worker\.js|vendor\/(?:ffmpeg|core|vorbis)-/.test(address)) assets.push(address);
+  });
+  await configurePack(page, 'Vorbis original');
+  expectVorbis(original, 2, 48000);
+  await page.locator('#card-0 .song-input').setInputFiles({ name: 'calidad-original.ogg', mimeType: 'audio/ogg', buffer: original });
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expect(bytes).toEqual(original);
+  const decoded = await decodeOgg(page, bytes, 48000);
+  expect(decoded.channels).toBe(2);
+  expect(decoded.duration).toBeCloseTo(2.5, 2);
+  expect(assets).toEqual([]);
+});
+
+test('Opus inside an Ogg container is converted to Minecraft compatible Vorbis', async ({ page }) => {
+  await page.goto('/');
+  const original = await readFile(new URL('../fixtures/stereo-opus.ogg', import.meta.url));
+  expect(original.includes(Buffer.from('OpusHead'))).toBe(true);
+  await configurePack(page, 'Opus compatible');
+  await page.locator('#card-0 .song-input').setInputFiles({ name: 'cancion-opus.ogg', mimeType: 'audio/ogg', buffer: original });
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expect(bytes.equals(original)).toBe(false);
+  expectVorbis(bytes, 2, 44100);
+  const decoded = await decodeOgg(page, bytes);
+  expect(decoded.channels).toBe(2);
+  expect(decoded.duration).toBeCloseTo(2.5, 2);
+});
+
+test('a native decoding error falls back to FFmpeg and produces playable Vorbis', async ({ page }) => {
+  await page.addInitScript(() => {
+    const Original = window.OfflineAudioContext;
+    class UnsupportedDecoder extends Original {
+      decodeAudioData() { return Promise.reject(new DOMException('Unsupported test codec', 'EncodingError')); }
+    }
+    window.OfflineAudioContext = UnsupportedDecoder;
+    window.webkitOfflineAudioContext = UnsupportedDecoder;
+  });
+  const cores = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/ffmpeg-core.wasm')) cores.push(request.url());
+  });
+  await page.goto('/');
+  await configurePack(page, 'Recuperación del decodificador');
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('decodificador-alternativo.wav'));
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expectVorbis(bytes, 2, 44100);
+  expect((await decodeOgg(page, bytes)).duration).toBeCloseTo(0.25, 2);
+  expect(cores).toHaveLength(1);
+});
+
+test('a failed fast encoder worker falls back to FFmpeg for the same valid song', async ({ page }) => {
+  await page.route('**/vorbis-worker.js', (route) => route.abort());
+  const cores = [];
+  page.on('request', (request) => {
+    if (request.url().endsWith('/ffmpeg-core.wasm')) cores.push(request.url());
+  });
+  await page.goto('/');
+  await configurePack(page, 'Recuperación del codificador');
+  await page.locator('#card-0 .song-input').setInputFiles(wavFile('worker-alternativo.wav'));
+  await expect(page.locator('#card-0')).toHaveClass(/ready/);
+  const { zip } = await downloadZip(page);
+  const bytes = await zip.file('sounds/music/game/records/11.ogg').async('nodebuffer');
+  expectVorbis(bytes, 2, 44100);
+  expect((await decodeOgg(page, bytes)).duration).toBeCloseTo(0.25, 2);
+  expect(cores).toHaveLength(1);
+});
+
+test('canceling one of two parallel conversions lets the other song finish normally', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'hardwareConcurrency', { configurable: true, get: () => 8 });
+    Object.defineProperty(navigator, 'deviceMemory', { configurable: true, get: () => 8 });
+  });
+  let releaseWorkers;
+  let bothStarted;
+  const workersGate = new Promise((resolve) => { releaseWorkers = resolve; });
+  const workersStarted = new Promise((resolve) => { bothStarted = resolve; });
+  let requests = 0;
+  await page.route('**/vorbis-worker.js', async (route) => {
+    requests += 1;
+    if (requests === 2) bothStarted();
+    await workersGate;
+    await route.continue().catch(() => {});
+  });
+  await page.goto('/');
+  await configurePack(page, 'Dos conversiones');
+  try {
+    await page.locator('#bulkSongs').setInputFiles([wavFile('cancelada.wav'), wavFile('conservar.wav', 660)]);
+    await workersStarted;
+    await expect(page.locator('#card-0')).toHaveClass(/converting/);
+    await expect(page.locator('#card-1')).toHaveClass(/converting/);
+    await page.locator('#card-0 .btn-close').click();
+    await expect(page.locator('#card-0')).toHaveClass(/empty/);
+    await expect(page.locator('#card-1')).toHaveClass(/converting/);
+    releaseWorkers();
+    await expect(page.locator('#card-1')).toHaveClass(/ready/);
+    await expect(page.locator('#readyCount')).toHaveText('1');
+    await expect(page.locator('#card-0 audio')).not.toHaveAttribute('src');
+    const { zip } = await downloadZip(page);
+    expect(zip.file('sounds/music/game/records/11.ogg')).toBeNull();
+    const bytes = await zip.file('sounds/music/game/records/13.ogg').async('nodebuffer');
+    expectVorbis(bytes, 1, 44100);
+    expect(Math.abs((await decodeOgg(page, bytes)).frequencies[0] - 660)).toBeLessThan(5);
+    await page.locator('#card-0 .song-input').setInputFiles(wavFile('nueva.wav'));
+    await expect(page.locator('#card-0')).toHaveClass(/ready/);
+    await expect(page.locator('#readyCount')).toHaveText('2');
+  } finally {
+    releaseWorkers();
+  }
+});
+
 test('embedded MP3 artwork loads lazily and becomes the original disc item texture', async ({ page }) => {
   const metadataRequests = [];
   page.on('request', (request) => {
@@ -387,6 +622,7 @@ test('embedded MP3 artwork loads lazily and becomes the original disc item textu
 });
 
 test('manual artwork survives audio conversion, overrides modern textures and can restore the original sprite', async ({ page }) => {
+  await forceFFmpeg(page);
   let releaseCore;
   let startedCore;
   const coreGate = new Promise((resolve) => { releaseCore = resolve; });
