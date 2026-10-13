@@ -2,352 +2,135 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Minecraft Music Studio - Anti-FLAC Bug</title>
-    
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-    <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js"></script>
-    
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#13101c">
+    <meta name="description" content="Crea tu pack de música para Minecraft Bedrock. Elige tus canciones, personaliza la portada y descarga tu archivo .mcpack desde el navegador.">
+    <title>Music Studio · Minecraft Bedrock | Preciseweb</title>
     <link rel="stylesheet" href="style.css">
-    
-    <style>
-        .custom-progress-bg {
-            width: 100%; height: 8px; background: rgba(255,255,255,0.1); 
-            border-radius: 10px; overflow: hidden; margin-top: 8px;
-        }
-        .custom-progress-fill {
-            width: 0%; height: 100%; background: var(--st-converting); 
-            transition: width 0.3s ease; border-radius: 10px;
-        }
-        .ready .custom-progress-fill { background: var(--st-ready); }
-        .error .custom-progress-fill { background: var(--st-error); }
-    </style>
+    <script type="module" src="app.js"></script>
 </head>
 <body>
-
-<header class="app-header glass">
-    <h1>🎵 Music Studio</h1>
-</header>
-
-<main class="app-main">
-    <section class="panel glass">
-        <div class="input-group">
-            <label for="modName">Nombre del Mod</label>
-            <input type="text" id="modName" placeholder="Ej. Mis Éxitos" required>
+    <a class="skip-link" href="#studio">Ir al creador de música</a>
+    <header class="app-header">
+        <div class="header-inner page-width">
+            <a class="brand" href="#" aria-label="Music Studio, inicio">
+                <span class="brand-mark" aria-hidden="true">
+                    <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="11.5" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="4" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="16" r="1" fill="currentColor"/><path d="M8.5 12.5A8.3 8.3 0 0 1 12.5 8.5M19.5 23.5A8.3 8.3 0 0 0 23.5 19.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                </span>
+                <span class="brand-name">Music<span>Studio</span></span>
+            </a>
+            <nav class="header-nav" aria-label="Navegación principal">
+                <a class="nav-link active" href="#studio" aria-current="page">Crear pack</a>
+                <a class="nav-link" href="#guide">Cómo funciona</a>
+            </nav>
+            <span class="edition-badge"><span aria-hidden="true"></span> Bedrock Edition</span>
         </div>
+    </header>
 
-        <div class="input-group">
-            <label for="modDesc">Descripción</label>
-            <input type="text" id="modDesc" placeholder="Ej. Paquete de los 22 discos" required>
-        </div>
+    <main class="app-main page-width">
+        <section class="hero" aria-labelledby="hero-title">
+            <div class="hero-copy">
+                <p class="eyebrow"><span aria-hidden="true"></span> TU PRÓXIMA AVENTURA TIENE SOUNDTRACK</p>
+                <h1 id="hero-title">Tu música.<br><span>Tu mundo.</span></h1>
+                <p class="hero-description">Dale un nuevo sonido a Minecraft Bedrock. Convierte tus canciones en discos y crea un pack que sea completamente tuyo.</p>
+                <div class="hero-features">
+                    <span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2 16 4.5v5c0 3.5-3.3 6.1-6 8-2.7-1.9-6-4.5-6-8v-5L10 2Z" stroke="currentColor" stroke-width="1.5"/><path d="m7.5 9.5 1.6 1.6 3.4-3.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Procesado en tu dispositivo</span>
+                    <span><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2v10m-3-3 3 3 3-3M4 12.5V16h12v-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Descarga .mcpack</span>
+                </div>
+            </div>
+            <div class="hero-art" aria-hidden="true">
+                <div class="record-sleeve"><span class="sleeve-label">PRECISEWEB RECORDS</span><div class="sleeve-grid"></div><span class="sleeve-title">YOUR<br>WORLD<br><em>VOL. 01</em></span><span class="sleeve-detail">CUSTOM MUSIC PACK · BEDROCK</span></div>
+                <div class="hero-record"><span class="record-label"><svg viewBox="0 0 24 24" fill="none"><path d="M9 17V6l10-2v11M9 8l10-2" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><ellipse cx="6" cy="17" rx="3" ry="2" fill="currentColor"/><ellipse cx="16" cy="15" rx="3" ry="2" fill="currentColor"/></svg></span></div>
+                <div class="art-caption"><span></span> Un mundo, tu propia mezcla.</div>
+            </div>
+        </section>
 
-        <div class="input-group">
-            <label for="modIcon">📸 Imagen de Portada (pack_icon.png)</label>
-            <input type="file" id="modIcon" accept="image/png, image/jpeg" required class="file-input">
-        </div>
-    </section>
+        <ol class="quick-guide" id="guide" aria-label="Cómo crear tu pack">
+            <li><span class="step-number">01</span><div><strong>Personaliza</strong><span>Ponle nombre y portada a tu pack.</span></div></li>
+            <li><span class="step-number">02</span><div><strong>Añade tu música</strong><span>Elige los discos que quieres cambiar.</span></div></li>
+            <li><span class="step-number">03</span><div><strong>Llévalo a tu mundo</strong><span>Descarga e importa en Minecraft.</span></div></li>
+        </ol>
 
-    <section class="panel glass bulk-panel">
-        <div class="bulk-content">
-            <h3>📥 Carga Rápida en Lote</h3>
-            <p>Selecciona varios archivos a la vez para llenar los discos automáticamente.</p>
-            <p style="color: var(--accent); font-weight: 800; margin-top: -5px; font-size: 0.95rem;">⚠️ Límite: Solo se pueden subir 22 canciones.</p>
-            <label for="bulkSongs" class="btn-action primary-glow">Elegir Múltiples Audios</label>
-            <input type="file" id="bulkSongs" accept="audio/*" multiple style="display:none;">
-        </div>
-    </section>
-
-    <section class="disc-list" id="discsGrid"></section>
-</main>
-
-<div class="bottom-bar glass">
-    <div id="globalStatus">Esperando audios...</div>
-    <button id="generateBtn" class="btn-generate">🚀 Empaquetar Mod</button>
-</div>
-
-<script>
-    const DISCS = [
-        "11", "13", "blocks", "cat", "chirp", "far", 
-        "mall", "mellohi", "stal", "strad", "wait", "ward", 
-        "pigstep", "otherside", "5", "relic", "precipice", 
-        "creator", "creator_music_box", "tears", "bounce", "lava_chicken"
-    ];
-
-    let slotsData = DISCS.map(name => ({ discName: name, file: null, blob: null, status: 'empty', progress: 0 }));
-    let conversionQueue = [];
-    let isProcessingQueue = false;
-
-    // Puente Nativo
-    function audioBufferToWav(buffer) {
-        let numOfChan = buffer.numberOfChannels,
-            length = buffer.length * numOfChan * 2 + 44,
-            bufferArray = new ArrayBuffer(length),
-            view = new DataView(bufferArray),
-            channels = [], i, sample, offset = 0, pos = 0;
-
-        setUint32(0x46464952); setUint32(length - 8); setUint32(0x45564157); setUint32(0x20746d66);
-        setUint32(16); setUint16(1); setUint16(numOfChan); setUint32(buffer.sampleRate);
-        setUint32(buffer.sampleRate * 2 * numOfChan); setUint16(numOfChan * 2); setUint16(16);
-        setUint32(0x61746164); setUint32(length - pos - 4);
-
-        for(i = 0; i < buffer.numberOfChannels; i++) channels.push(buffer.getChannelData(i));
-
-        while(pos < buffer.length) {
-            for(i = 0; i < numOfChan; i++) {
-                sample = Math.max(-1, Math.min(1, channels[i][pos])); 
-                sample = (0.5 + sample < 0 ? sample * 32768 : sample * 32767)|0; 
-                view.setInt16(offset, sample, true); offset += 2;
-            }
-            pos++;
-        }
-        return new Blob([bufferArray], {type: "audio/wav"});
-
-        function setUint16(data) { view.setUint16(offset, data, true); offset += 2; }
-        function setUint32(data) { view.setUint32(offset, data, true); offset += 4; }
-    }
-
-    // Lector Nativo Aislado
-    async function decodeNatively(file) {
-        let ctx = new (window.AudioContext || window.webkitAudioContext)();
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-            return audioBufferToWav(audioBuffer);
-        } finally {
-            if (ctx.state !== 'closed') ctx.close();
-        }
-    }
-
-    function initGrid() {
-        const grid = document.getElementById('discsGrid');
-        slotsData.forEach((slot, index) => {
-            const card = document.createElement('div');
-            card.className = `disc-card empty`;
-            card.id = `card-${index}`;
-            card.innerHTML = `
-                <div class="card-header">
-                    <div class="disc-icon">💿</div>
-                    <div class="disc-info">
-                        <h3>Disco: ${slot.discName}</h3>
-                        <p id="name-${index}">Vacío</p>
+        <div class="studio-layout" id="studio">
+            <aside class="studio-sidebar" aria-label="Configuración y descarga del pack">
+                <form class="panel setup-panel" id="packForm">
+                    <div class="panel-heading"><span class="section-number">01</span><h2>Tu pack de música</h2></div>
+                    <p class="panel-description">Los pequeños detalles lo hacen tuyo.</p>
+                    <div class="input-group">
+                        <label for="modName">Nombre del pack <span class="required-mark" aria-hidden="true">*</span></label>
+                        <input type="text" id="modName" name="modName" maxlength="80" placeholder="Ej. Mi aventura musical" autocomplete="off" required>
                     </div>
-                    <button class="btn-close" onclick="clearSlot(${index})">✕</button>
+                    <div class="input-group">
+                        <label for="modDesc">Descripción <span class="required-mark" aria-hidden="true">*</span></label>
+                        <textarea id="modDesc" name="modDesc" rows="3" maxlength="500" placeholder="Cuéntale a tu mundo qué va a sonar…" aria-describedby="descriptionHelp" required></textarea>
+                        <p class="field-hint" id="descriptionHelp">Hasta 500 caracteres. Al final se añadirán automáticamente el crédito de Preciseweb y el enlace al creador.</p>
+                    </div>
+                    <details class="description-details">
+                        <summary>Ver descripción final <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+                        <pre id="descriptionPreview">Echo por Preciseweb
+link para crear tu mod de musica: https://musica-minecraft-bedrock.vercel.app/</pre>
+                    </details>
+                    <div class="input-group cover-group">
+                        <label for="modIcon">Portada del pack <span class="required-mark" aria-hidden="true">*</span></label>
+                        <div class="cover-upload">
+                            <div class="cover-preview">
+                                <img id="iconPreview" alt="Vista previa de la portada del pack" hidden>
+                                <span id="iconPlaceholder" aria-hidden="true"><svg viewBox="0 0 28 28" fill="none"><rect x="4" y="4" width="20" height="20" rx="4" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2" stroke="currentColor" stroke-width="1.5"/><path d="m5 20 6-6 4 4 4-5 4 5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+                            </div>
+                            <div class="cover-info">
+                                <label class="cover-button" for="modIcon">Elegir imagen</label>
+                                <span id="iconName">Ninguna imagen seleccionada</span>
+                                <span class="field-hint">PNG, JPG o WEBP</span>
+                            </div>
+                            <input class="visually-hidden" type="file" id="modIcon" name="modIcon" accept="image/png,image/jpeg,image/webp" required>
+                        </div>
+                    </div>
+                </form>
+
+                <section class="panel download-panel" aria-labelledby="download-title">
+                    <div class="panel-heading"><span class="section-number">03</span><h2 id="download-title">Listo para tu mundo</h2></div>
+                    <p id="globalStatus" role="status" aria-live="polite">Añade una canción para comenzar.</p>
+                    <progress id="globalProgress" max="100" value="0" aria-label="Progreso del pack"></progress>
+                    <button class="btn-generate" id="generateBtn" type="button" disabled><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2v10m-3-3 3 3 3-3M4 12.5V16h12v-3.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>Descargar mi pack</button>
+                    <p class="download-hint" id="packHint">Recibirás un archivo .mcpack. Ábrelo con Minecraft e incorpóralo a los recursos de tu mundo.</p>
+                    <span class="local-note"><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M5 7V5a3 3 0 0 1 6 0v2" stroke="currentColor" stroke-width="1.3"/></svg>Tus archivos se quedan en tu dispositivo.</span>
+                </section>
+            </aside>
+
+            <section class="workspace" aria-labelledby="collection-title">
+                <div class="collection-heading">
+                    <div><div class="panel-heading"><span class="section-number">02</span><h2 id="collection-title">Tu colección de discos</h2></div><p>Asigna una canción a cada disco que quieras personalizar.</p></div>
+                    <span class="ready-badge"><span aria-hidden="true"></span><strong id="readyCount">0</strong> listos</span>
                 </div>
-                <div class="custom-progress-bg">
-                    <div id="progress-${index}" class="custom-progress-fill"></div>
+                <div class="upload-zone" id="dropZone">
+                    <div class="upload-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4m-4 4 4-4 4 4M4 14v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+                    <div class="upload-copy"><h3>Arrastra aquí tus canciones</h3><p>O elige varios archivos para llenar los discos disponibles.</p><span>MP3, WAV, OGG, FLAC y otros formatos de audio</span></div>
+                    <button class="btn-action primary" id="bulkUploadBtn" type="button">Elegir audios<svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 9h10m-4-4 4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+                    <input class="visually-hidden" type="file" id="bulkSongs" accept="audio/*,.mp3,.wav,.ogg,.flac,.m4a,.aac,.opus,.webm" multiple tabindex="-1">
                 </div>
-                <div class="card-actions">
-                    <button class="btn-action secondary" onclick="triggerIndividualUpload(${index})">
-                        Subir Audio
-                    </button>
-                    <input type="file" id="input-${index}" accept="audio/*" style="display:none;" onchange="handleIndividualUpload(this, ${index})">
-                </div>
-            `;
-            grid.appendChild(card);
-        });
-    }
+                <div class="notice" id="notice" role="status" aria-live="polite" hidden></div>
+                <div class="collection-toolbar"><p><strong id="selectedCount">0</strong> de <span id="totalDiscs">22</span> discos seleccionados</p><button class="text-button" id="clearAllBtn" type="button" disabled><svg viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M3 5h12M7 5V3h4v2M5 5l.6 10h6.8L13 5M8 8v4m2-4v4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>Limpiar todo</button></div>
+                <div class="disc-grid" id="discsGrid"></div>
+                <p class="collection-note"><span aria-hidden="true">✦</span> Puedes crear tu pack con una sola canción. Los discos sin asignar conservarán su música original. La disponibilidad de cada disco depende de tu versión de Minecraft.</p>
+            </section>
+        </div>
+    </main>
 
-    window.triggerIndividualUpload = function(index) { document.getElementById(`input-${index}`).click(); };
-    window.handleIndividualUpload = function(input, index) {
-        if (input.files.length > 0) { assignFileToSlot(input.files[0], index); input.value = ""; }
-    };
-    window.clearSlot = function(index) {
-        conversionQueue = conversionQueue.filter(item => item !== index);
-        slotsData[index] = { ...slotsData[index], file: null, blob: null, status: 'empty', progress: 0 };
-        updateCardUI(index);
-    };
-
-    document.getElementById('bulkSongs').addEventListener('change', (e) => {
-        const files = e.target.files;
-        let fileIndex = 0;
-        for (let i = 0; i < slotsData.length; i++) {
-            if (fileIndex >= files.length) break;
-            if (slotsData[i].status === 'empty' || slotsData[i].status === 'error') {
-                assignFileToSlot(files[fileIndex], i);
-                fileIndex++;
-            }
-        }
-        e.target.value = ""; 
-    });
-
-    function assignFileToSlot(file, index) {
-        slotsData[index] = { ...slotsData[index], file, blob: null, status: 'converting', progress: 0 };
-        updateCardUI(index);
-        if (!conversionQueue.includes(index)) {
-            conversionQueue.push(index);
-            processQueue();
-        }
-    }
-
-    function updateCardUI(index) {
-        const slot = slotsData[index];
-        const card = document.getElementById(`card-${index}`);
-        const nameText = document.getElementById(`name-${index}`);
-        const progressBar = document.getElementById(`progress-${index}`);
-
-        card.className = `disc-card ${slot.status}`;
-        progressBar.style.width = `${slot.progress}%`;
-
-        if (slot.status === 'empty') {
-            nameText.innerText = "Vacío";
-        } else if (slot.status === 'converting') {
-            nameText.innerText = `⏳ Procesando: ${slot.progress}%`;
-        } else if (slot.status === 'ready') {
-            nameText.innerText = `🎵 Listo`;
-        } else if (slot.status === 'error') {
-            nameText.innerText = `❌ Error, archivo inválido.`;
-        }
-    }
-
-    async function processQueue() {
-        if (isProcessingQueue) return;
-        isProcessingQueue = true;
-
-        const { createFFmpeg, fetchFile } = FFmpeg;
-
-        while (conversionQueue.length > 0) {
-            const index = conversionQueue.shift();
-            if (slotsData[index].status === 'empty') continue;
-
-            slotsData[index].status = 'converting';
-            slotsData[index].progress = 0;
-            updateCardUI(index);
-
-            let ffmpegInstance = null;
-
-            try {
-                const file = slotsData[index].file;
-                const ext = file.name.split('.').pop().toLowerCase();
-                
-                let fileToProcess = file;
-                let inputExt = ext;
-
-                // 1. Detección Inteligente de FLAC
-                if (ext !== 'flac') {
-                    try {
-                        document.getElementById('globalStatus').innerText = `Leyendo audio ${slotsData[index].discName} (Nativo)...`;
-                        fileToProcess = await decodeNatively(file);
-                        inputExt = 'wav';
-                    } catch (e) {
-                        console.log("Decodificación nativa falló, usando archivo original.");
-                    }
-                } else {
-                    document.getElementById('globalStatus').innerText = `Preparando FLAC ${slotsData[index].discName}...`;
-                }
-                
-                slotsData[index].progress = 25;
-                updateCardUI(index);
-
-                // 2. FFmpeg Blindado
-                document.getElementById('globalStatus').innerText = `Comprimiendo a formato Minecraft...`;
-                
-                ffmpegInstance = createFFmpeg({ 
-                    corePath: 'https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js',
-                    log: false 
-                });
-
-                ffmpegInstance.setProgress(({ ratio }) => {
-                    let pct = 25 + Math.round(Math.max(0, Math.min(1, ratio)) * 75);
-                    slotsData[index].progress = pct;
-                    updateCardUI(index);
-                });
-
-                await ffmpegInstance.load();
-
-                const inputName = `input_${index}.${inputExt}`;
-                const outputName = `out_${index}.ogg`;
-
-                ffmpegInstance.FS('writeFile', inputName, await fetchFile(fileToProcess));
-                
-                // COMANDO ANTI-CRASH: -vn (quita portada) -map_metadata -1 (quita tags corruptos) -ar 44100 (estandariza)
-                await ffmpegInstance.run('-i', inputName, '-vn', '-map_metadata', '-1', '-ar', '44100', '-c:a', 'libvorbis', '-q:a', '2', outputName);
-                
-                const data = ffmpegInstance.FS('readFile', outputName);
-                slotsData[index].blob = data.buffer;
-                slotsData[index].status = 'ready';
-                slotsData[index].progress = 100;
-
-            } catch (err) {
-                console.error("Fallo detectado en disco " + index, err);
-                slotsData[index].status = 'error';
-            } finally {
-                if (ffmpegInstance) {
-                    try { ffmpegInstance.exit(); } catch(e) {}
-                }
-                updateCardUI(index);
-                await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-        
-        isProcessingQueue = false;
-        document.getElementById('globalStatus').innerText = "✅ Audios procesados";
-    }
-
-    document.getElementById('generateBtn').addEventListener('click', async () => {
-        const name = document.getElementById('modName').value;
-        const desc = document.getElementById('modDesc').value;
-        const iconFile = document.getElementById('modIcon').files[0];
-        const statusEl = document.getElementById('globalStatus');
-        const btn = document.getElementById('generateBtn');
-
-        if (!name || !desc || !iconFile) { alert("Completa el Nombre, Descripción e Icono."); return; }
-
-        const missingDiscs = slotsData.filter(s => s.status !== 'ready').map(s => s.discName);
-        if (missingDiscs.length > 0) { alert(`Aún faltan discos por llenar: ${missingDiscs.join(', ')}`); return; }
-
-        try {
-            btn.disabled = true;
-            statusEl.innerText = "Empaquetando mod, no cierres la app...";
-
-            const zip = new JSZip();
-            
-            const manifest = {
-                format_version: 2,
-                header: { name: name, description: desc, uuid: crypto.randomUUID(), version: [1, 0, 0], min_engine_version: [1, 16, 0] },
-                modules: [{ type: "resources", uuid: crypto.randomUUID(), description: desc, version: [1, 0, 0] }]
-            };
-            zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-            zip.file("pack_icon.png", iconFile);
-
-            const soundDefinitions = {
-                format_version: "1.21.0",
-                sound_definitions: {}
-            };
-
-            const recordsFolder = zip.folder("sounds").folder("music").folder("game").folder("records");
-            
-            slotsData.forEach(slot => {
-                recordsFolder.file(`${slot.discName}.ogg`, slot.blob);
-                soundDefinitions.sound_definitions[`record.${slot.discName}`] = {
-                    category: "record",
-                    stream: true,
-                    sounds: [`sounds/music/game/records/${slot.discName}`]
-                };
-            });
-
-            zip.folder("sounds").file("sound_definitions.json", JSON.stringify(soundDefinitions, null, 2));
-
-            const blob = await zip.generateAsync({ type: "blob" });
-            const downloadUrl = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = downloadUrl;
-            a.download = `${name.replace(/\s+/g, '_')}.mcpack`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(downloadUrl);
-
-            statusEl.innerText = "¡Listo para instalar!";
-            statusEl.style.color = "#10b981";
-        } catch (error) {
-            statusEl.innerText = "Error crítico.";
-            statusEl.style.color = "#ef4444";
-        } finally {
-            btn.disabled = false;
-        }
-    });
-
-    document.addEventListener('DOMContentLoaded', initGrid);
-</script>
+    <div class="mobile-download-bar" id="mobileDownloadBar" hidden>
+        <p id="mobilePackStatus" aria-live="polite"></p>
+        <button type="button" id="mobileGenerateBtn" disabled>Descargar .mcpack</button>
+    </div>
+    <footer class="app-footer page-width">
+        <div class="footer-top">
+            <div class="footer-copy"><a class="footer-brand" href="https://musica-minecraft-bedrock.vercel.app/">Preciseweb<span aria-hidden="true">↗</span></a><p>Un poco de música para tus grandes mundos.</p></div>
+            <div class="social-area"><p>Sigue a Preciseweb <span>Enlaces próximamente</span></p><div class="social-links" aria-label="Redes sociales de Preciseweb">
+                <a class="social-link" id="social-instagram" aria-label="Instagram de Preciseweb, enlace próximamente" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor"/></svg><span class="visually-hidden">Instagram</span></a>
+                <a class="social-link" id="social-tiktok" aria-label="TikTok de Preciseweb, enlace próximamente" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M14 3v12.5a4.5 4.5 0 1 1-4.5-4.5M14 3c.5 3.8 2.5 5.5 6 5.5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="visually-hidden">TikTok</span></a>
+                <a class="social-link" id="social-telegram" aria-label="Telegram de Preciseweb, enlace próximamente" aria-disabled="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 10 18-7-4 18-6-6-4 3 1-6 9-6-11 5-3-1Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg><span class="visually-hidden">Telegram</span></a>
+            </div></div>
+        </div>
+        <div class="footer-bottom"><span>Music Studio · Hecho por Preciseweb</span><span>Proyecto independiente para Minecraft Bedrock.</span></div>
+    </footer>
+    <noscript><div class="noscript-message">Activa JavaScript en tu navegador para convertir tus canciones y descargar el pack.</div></noscript>
 </body>
 </html>
